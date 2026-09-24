@@ -1,0 +1,69 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+*.tmp
+*.bak
+Thumbs.db
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Visual Studio Code related
+.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication & Obfuscation related
+app.*.symbols
+app.*.map.json
+
+# Android build & local configuration
+**/android/local.properties
+**/android/.gradle/
+**/android/.cxx/
+**/android/.kotlin/
+**/android/app/debug
+**/android/app/profile
+**/android/app/release
+**/android/key.properties
+**/*.keystore
+**/*.jks
+
+# iOS build & generated artifacts
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/app.framework
+**/ios/Flutter/flutter_assets/
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Flutter.framework
+**/ios/Pods/
+**/ios/Runner.xcworkspace/xcuserdata/
+**/ios/Runner.xcodeproj/xcuserdata/
+**/ios/Runner/GeneratedPluginRegistrant.*
+
+# Desktop & Ephemeral builds
+**/ephemeral/
+
+# Widget Preview related
+.widget_preview/
