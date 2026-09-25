@@ -97,7 +97,7 @@ Message _messageDeserialize(
   Map<Type, List<int>> allOffsets,
 ) {
   final object = Message(
-    conversationId: reader.readLongOrNull(offsets[0]) ?? 0,
+    conversationId: reader.readLong(offsets[0]),
     createdAt: reader.readDateTime(offsets[1]),
     id: id,
     role: _MessageroleValueEnumMap[reader.readStringOrNull(offsets[3])] ??
@@ -117,7 +117,7 @@ P _messageDeserializeProp<P>(
 ) {
   switch (propertyId) {
     case 0:
-      return (reader.readLongOrNull(offset) ?? 0) as P;
+      return (reader.readLong(offset)) as P;
     case 1:
       return (reader.readDateTime(offset)) as P;
     case 2:

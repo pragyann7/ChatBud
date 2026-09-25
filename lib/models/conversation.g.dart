@@ -27,13 +27,18 @@ const ConversationSchema = CollectionSchema(
       name: r'createdAt',
       type: IsarType.dateTime,
     ),
-    r'title': PropertySchema(
+    r'isPinned': PropertySchema(
       id: 2,
+      name: r'isPinned',
+      type: IsarType.bool,
+    ),
+    r'title': PropertySchema(
+      id: 3,
       name: r'title',
       type: IsarType.string,
     ),
     r'updatedAt': PropertySchema(
-      id: 3,
+      id: 4,
       name: r'updatedAt',
       type: IsarType.dateTime,
     )
@@ -70,8 +75,9 @@ void _conversationSerialize(
 ) {
   writer.writeLong(offsets[0], object.budId);
   writer.writeDateTime(offsets[1], object.createdAt);
-  writer.writeString(offsets[2], object.title);
-  writer.writeDateTime(offsets[3], object.updatedAt);
+  writer.writeBool(offsets[2], object.isPinned);
+  writer.writeString(offsets[3], object.title);
+  writer.writeDateTime(offsets[4], object.updatedAt);
 }
 
 Conversation _conversationDeserialize(
@@ -84,8 +90,9 @@ Conversation _conversationDeserialize(
     budId: reader.readLongOrNull(offsets[0]),
     createdAt: reader.readDateTime(offsets[1]),
     id: id,
-    title: reader.readString(offsets[2]),
-    updatedAt: reader.readDateTime(offsets[3]),
+    isPinned: reader.readBoolOrNull(offsets[2]) ?? false,
+    title: reader.readString(offsets[3]),
+    updatedAt: reader.readDateTime(offsets[4]),
   );
   return object;
 }
@@ -102,8 +109,10 @@ P _conversationDeserializeProp<P>(
     case 1:
       return (reader.readDateTime(offset)) as P;
     case 2:
-      return (reader.readString(offset)) as P;
+      return (reader.readBoolOrNull(offset) ?? false) as P;
     case 3:
+      return (reader.readString(offset)) as P;
+    case 4:
       return (reader.readDateTime(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -385,6 +394,16 @@ extension ConversationQueryFilter
     });
   }
 
+  QueryBuilder<Conversation, Conversation, QAfterFilterCondition>
+      isPinnedEqualTo(bool value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'isPinned',
+        value: value,
+      ));
+    });
+  }
+
   QueryBuilder<Conversation, Conversation, QAfterFilterCondition> titleEqualTo(
     String value, {
     bool caseSensitive = true,
@@ -608,6 +627,18 @@ extension ConversationQuerySortBy
     });
   }
 
+  QueryBuilder<Conversation, Conversation, QAfterSortBy> sortByIsPinned() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isPinned', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Conversation, Conversation, QAfterSortBy> sortByIsPinnedDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isPinned', Sort.desc);
+    });
+  }
+
   QueryBuilder<Conversation, Conversation, QAfterSortBy> sortByTitle() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'title', Sort.asc);
@@ -671,6 +702,18 @@ extension ConversationQuerySortThenBy
     });
   }
 
+  QueryBuilder<Conversation, Conversation, QAfterSortBy> thenByIsPinned() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isPinned', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Conversation, Conversation, QAfterSortBy> thenByIsPinnedDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isPinned', Sort.desc);
+    });
+  }
+
   QueryBuilder<Conversation, Conversation, QAfterSortBy> thenByTitle() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'title', Sort.asc);
@@ -710,6 +753,12 @@ extension ConversationQueryWhereDistinct
     });
   }
 
+  QueryBuilder<Conversation, Conversation, QDistinct> distinctByIsPinned() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'isPinned');
+    });
+  }
+
   QueryBuilder<Conversation, Conversation, QDistinct> distinctByTitle(
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
@@ -741,6 +790,12 @@ extension ConversationQueryProperty
   QueryBuilder<Conversation, DateTime, QQueryOperations> createdAtProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'createdAt');
+    });
+  }
+
+  QueryBuilder<Conversation, bool, QQueryOperations> isPinnedProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'isPinned');
     });
   }
 

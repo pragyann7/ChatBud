@@ -13,8 +13,44 @@ class ChatRepository {
     });
   }
 
+  Future<void> togglePinConversation(Conversation conversation) async {
+    await isar.writeTxn(() async {
+      final updatedConv = conversation.copyWith(
+        isPinned: !conversation.isPinned,
+      );
+      await isar.conversations.put(updatedConv);
+    });
+  }
+
+  Future<void> renameConversation(Conversation conversation, String newTitle) async {
+    await isar.writeTxn(() async {
+      final updatedConv = conversation.copyWith(
+        title: newTitle,
+        updatedAt: DateTime.now(),
+      );
+      await isar.conversations.put(updatedConv);
+    });
+  }
+
+  Future<bool> deleteConversation(int conversationId) async {
+    return await isar.writeTxn(() async {
+      // Delete all messages belonging to this conversation first
+      await isar.messages
+          .filter()
+          .conversationIdEqualTo(conversationId)
+          .deleteAll();
+
+      // Delete the conversation record
+      return await isar.conversations.delete(conversationId);
+    });
+  }
+
   Future<List<Conversation>> getConversations() async {
-    return await isar.conversations.where().sortByUpdatedAtDesc().findAll();
+    return await isar.conversations
+        .where()
+        .sortByIsPinnedDesc()
+        .thenByUpdatedAtDesc()
+        .findAll();
   }
 
   Future<Conversation?> getConversation(int id) async {
@@ -38,12 +74,8 @@ class ChatRepository {
       message.id = msgId;
       final conv = await isar.conversations.get(message.conversationId);
       if (conv != null) {
-        final updatedConv = Conversation(
-          id: conv.id,
-          title: conv.title,
-          createdAt: conv.createdAt,
+        final updatedConv = conv.copyWith(
           updatedAt: DateTime.now(),
-          budId: conv.budId,
         );
         await isar.conversations.put(updatedConv);
       }
@@ -89,7 +121,11 @@ class ChatRepository {
   }
 
   Stream<List<Conversation>> watchConversations() {
-    return isar.conversations.where().sortByUpdatedAtDesc().watch(fireImmediately: true);
+    return isar.conversations
+        .where()
+        .sortByIsPinnedDesc()
+        .thenByUpdatedAtDesc()
+        .watch(fireImmediately: true);
   }
 
   Stream<List<Message>> watchMessagesForConversation(int conversationId) {

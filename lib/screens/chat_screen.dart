@@ -137,12 +137,8 @@ class _ChatScreenState extends State<ChatScreen> {
           updatedAt: now,
         );
       } else {
-        _currentConversation = Conversation(
-          id: _currentConversation!.id,
-          title: _currentConversation!.title,
-          createdAt: _currentConversation!.createdAt,
+        _currentConversation = _currentConversation!.copyWith(
           updatedAt: now,
-          budId: _currentConversation!.budId,
         );
       }
 
@@ -252,8 +248,7 @@ class _ChatScreenState extends State<ChatScreen> {
         createdAt: oldMessage.createdAt,
       );
 
-      // If this write fails, the persisted pending status is intentionally kept.
-      // Startup recovery can then mark the interrupted response as failed.
+      // Save final message text to Isar database
       try {
         await _chatRepository.saveMessageAndTouchConversation(updatedMsg);
       } catch (error, stackTrace) {
@@ -375,4 +370,8 @@ class _ChatScreenState extends State<ChatScreen> {
       ],
     );
   }
+}
+
+int _newMessageId() {
+  return DateTime.now().microsecondsSinceEpoch;
 }
