@@ -38,8 +38,14 @@ const MessageSchema = CollectionSchema(
       type: IsarType.string,
       enumMap: _MessageroleEnumValueMap,
     ),
-    r'text': PropertySchema(
+    r'status': PropertySchema(
       id: 4,
+      name: r'status',
+      type: IsarType.string,
+      enumMap: _MessagestatusEnumValueMap,
+    ),
+    r'text': PropertySchema(
+      id: 5,
       name: r'text',
       type: IsarType.string,
     )
@@ -65,6 +71,7 @@ int _messageEstimateSize(
 ) {
   var bytesCount = offsets.last;
   bytesCount += 3 + object.role.name.length * 3;
+  bytesCount += 3 + object.status.name.length * 3;
   bytesCount += 3 + object.text.length * 3;
   return bytesCount;
 }
@@ -79,7 +86,8 @@ void _messageSerialize(
   writer.writeDateTime(offsets[1], object.createdAt);
   writer.writeBool(offsets[2], object.isUser);
   writer.writeString(offsets[3], object.role.name);
-  writer.writeString(offsets[4], object.text);
+  writer.writeString(offsets[4], object.status.name);
+  writer.writeString(offsets[5], object.text);
 }
 
 Message _messageDeserialize(
@@ -94,7 +102,9 @@ Message _messageDeserialize(
     id: id,
     role: _MessageroleValueEnumMap[reader.readStringOrNull(offsets[3])] ??
         MessageRole.user,
-    text: reader.readString(offsets[4]),
+    status: _MessagestatusValueEnumMap[reader.readStringOrNull(offsets[4])] ??
+        MessageStatus.completed,
+    text: reader.readString(offsets[5]),
   );
   return object;
 }
@@ -116,6 +126,9 @@ P _messageDeserializeProp<P>(
       return (_MessageroleValueEnumMap[reader.readStringOrNull(offset)] ??
           MessageRole.user) as P;
     case 4:
+      return (_MessagestatusValueEnumMap[reader.readStringOrNull(offset)] ??
+          MessageStatus.completed) as P;
+    case 5:
       return (reader.readString(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -131,6 +144,16 @@ const _MessageroleValueEnumMap = {
   r'user': MessageRole.user,
   r'assistant': MessageRole.assistant,
   r'system': MessageRole.system,
+};
+const _MessagestatusEnumValueMap = {
+  r'pending': r'pending',
+  r'completed': r'completed',
+  r'failed': r'failed',
+};
+const _MessagestatusValueEnumMap = {
+  r'pending': MessageStatus.pending,
+  r'completed': MessageStatus.completed,
+  r'failed': MessageStatus.failed,
 };
 
 Id _messageGetId(Message object) {
@@ -521,6 +544,136 @@ extension MessageQueryFilter
     });
   }
 
+  QueryBuilder<Message, Message, QAfterFilterCondition> statusEqualTo(
+    MessageStatus value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'status',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> statusGreaterThan(
+    MessageStatus value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'status',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> statusLessThan(
+    MessageStatus value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'status',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> statusBetween(
+    MessageStatus lower,
+    MessageStatus upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'status',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> statusStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'status',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> statusEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'status',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> statusContains(
+      String value,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'status',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> statusMatches(
+      String pattern,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'status',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> statusIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'status',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> statusIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'status',
+        value: '',
+      ));
+    });
+  }
+
   QueryBuilder<Message, Message, QAfterFilterCondition> textEqualTo(
     String value, {
     bool caseSensitive = true,
@@ -707,6 +860,18 @@ extension MessageQuerySortBy on QueryBuilder<Message, Message, QSortBy> {
     });
   }
 
+  QueryBuilder<Message, Message, QAfterSortBy> sortByStatus() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'status', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterSortBy> sortByStatusDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'status', Sort.desc);
+    });
+  }
+
   QueryBuilder<Message, Message, QAfterSortBy> sortByText() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'text', Sort.asc);
@@ -782,6 +947,18 @@ extension MessageQuerySortThenBy
     });
   }
 
+  QueryBuilder<Message, Message, QAfterSortBy> thenByStatus() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'status', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterSortBy> thenByStatusDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'status', Sort.desc);
+    });
+  }
+
   QueryBuilder<Message, Message, QAfterSortBy> thenByText() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'text', Sort.asc);
@@ -822,6 +999,13 @@ extension MessageQueryWhereDistinct
     });
   }
 
+  QueryBuilder<Message, Message, QDistinct> distinctByStatus(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'status', caseSensitive: caseSensitive);
+    });
+  }
+
   QueryBuilder<Message, Message, QDistinct> distinctByText(
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
@@ -859,6 +1043,12 @@ extension MessageQueryProperty
   QueryBuilder<Message, MessageRole, QQueryOperations> roleProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'role');
+    });
+  }
+
+  QueryBuilder<Message, MessageStatus, QQueryOperations> statusProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'status');
     });
   }
 

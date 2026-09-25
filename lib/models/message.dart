@@ -8,6 +8,12 @@ enum MessageRole {
   system,
 }
 
+enum MessageStatus {
+  pending,
+  completed,
+  failed,
+}
+
 @collection
 class Message {
   Id id;
@@ -17,13 +23,17 @@ class Message {
   @Enumerated(EnumType.name)
   final MessageRole role;
 
+  @Enumerated(EnumType.name)
+  final MessageStatus status;
+
   final DateTime createdAt;
 
   Message({
     this.id = Isar.autoIncrement,
-    this.conversationId = 0,
+    required this.conversationId,
     required this.text,
     required this.role,
+    this.status = MessageStatus.completed,
     required this.createdAt,
   });
 

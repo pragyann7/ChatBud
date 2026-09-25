@@ -32,9 +32,51 @@ class ChatRepository {
     return saved ?? newConv;
   }
 
-  Future<int> saveMessage(Message message) async {
+  Future<int> saveMessageAndTouchConversation(Message message) async {
     return await isar.writeTxn(() async {
-      return await isar.messages.put(message);
+      final msgId = await isar.messages.put(message);
+      message.id = msgId;
+      final conv = await isar.conversations.get(message.conversationId);
+      if (conv != null) {
+        final updatedConv = Conversation(
+          id: conv.id,
+          title: conv.title,
+          createdAt: conv.createdAt,
+          updatedAt: DateTime.now(),
+          budId: conv.budId,
+        );
+        await isar.conversations.put(updatedConv);
+      }
+      return msgId;
+    });
+  }
+
+  Future<List<Message>> saveMessagePairAndTouchConversation({
+    required Conversation conversation,
+    required Message userMessage,
+    required Message assistantMessage,
+  }) async {
+    return isar.writeTxn(() async {
+      final conversationId = await isar.conversations.put(conversation);
+      conversation.id = conversationId;
+      final persistedUserMessage = Message(
+        conversationId: conversationId,
+        text: userMessage.text,
+        role: userMessage.role,
+        status: userMessage.status,
+        createdAt: userMessage.createdAt,
+      );
+      final persistedAssistantMessage = Message(
+        conversationId: conversationId,
+        text: assistantMessage.text,
+        role: assistantMessage.role,
+        status: assistantMessage.status,
+        createdAt: assistantMessage.createdAt,
+      );
+      persistedUserMessage.id = await isar.messages.put(persistedUserMessage);
+      persistedAssistantMessage.id =
+          await isar.messages.put(persistedAssistantMessage);
+      return [persistedUserMessage, persistedAssistantMessage];
     });
   }
 
@@ -44,21 +86,6 @@ class ChatRepository {
         .conversationIdEqualTo(conversationId)
         .sortByCreatedAt()
         .findAll();
-  }
-
-  Future<void> cleanUpEmptyConversations() async {
-    final conversations = await getConversations();
-    for (final conv in conversations) {
-      final count = await isar.messages
-          .filter()
-          .conversationIdEqualTo(conv.id)
-          .count();
-      if (count == 0) {
-        await isar.writeTxn(() async {
-          await isar.conversations.delete(conv.id);
-        });
-      }
-    }
   }
 
   Stream<List<Conversation>> watchConversations() {
