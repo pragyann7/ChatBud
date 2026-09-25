@@ -99,11 +99,11 @@ class _MyHomePageState extends State<MyHomePage> {
           children: [
             Text(
               _activeConversation?.title ?? "New Chat",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-            Text(
+            const Text(
               "Model Name",
-              style: const TextStyle(fontSize: 12),
+              style: TextStyle(fontSize: 12),
             ),
           ],
         ),
@@ -111,7 +111,12 @@ class _MyHomePageState extends State<MyHomePage> {
           IconButton(
             tooltip: "New Chat",
             onPressed: _startNewChat,
-            icon: Image.asset("assets/new_chat.png", width: 24, height: 24),
+            icon: Icon(Icons.edit_note),
+          ),
+          IconButton(
+            tooltip: "More",
+            onPressed: _startNewChat,
+            icon: Icon(Icons.more_vert),
           ),
         ],
       ),
@@ -278,7 +283,7 @@ class AppDrawer extends StatelessWidget {
                 title: Text(
                   "ChatBud",
                   style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
+                    fontWeight: FontWeight.normal,
                   ),
                 ),
                 onTap: () {
@@ -477,44 +482,45 @@ class AppDrawer extends StatelessWidget {
                 },
               ),
             ),
-            Divider(
-              indent: 16,
-              endIndent: 16,
-              height: 1,
-              thickness: 0.8,
-              color: theme.colorScheme.outlineVariant.withOpacity(0.5),
-            ),
             Container(
               padding: const EdgeInsets.only(
-                left: 8,
-                right: 8,
-                top: 4,
+                left: 12,
+                right: 12,
+                top: 8,
                 bottom: 22,
               ),
               child: Row(
                 children: [
                   Expanded(
-                    child: ListTile(
-                      dense: true,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: theme.colorScheme.primaryContainer,
+                        foregroundColor: theme.colorScheme.onPrimaryContainer,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        alignment: Alignment.centerLeft,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        elevation: 0,
                       ),
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 12),
-                      leading: const Icon(Icons.add_rounded, size: 20),
-                      title: const Text(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        onNewChat();
+                      },
+                      icon: const Icon(Icons.add_rounded, size: 20),
+                      label: const Text(
                         "New Chat",
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      onTap: () {
-                        Navigator.pop(context);
-                        onNewChat();
-                      },
                     ),
                   ),
+                  const SizedBox(width: 8),
                   IconButton(
                     tooltip: "Settings",
                     onPressed: () {
