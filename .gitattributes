@@ -1,0 +1,5 @@
+# Mark generated Gradle/Isar files as generated so GitHub doesn't misclassify project language statistics
+*problems-report*.html linguist-generated=true
+*.html linguist-generated=true
+*.g.dart linguist-generated=true
+**/build/** linguist-generated=true
