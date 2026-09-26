@@ -57,11 +57,15 @@ class ChatRepository {
     return await isar.conversations.get(id);
   }
 
-  Future<Conversation> createNewConversation([String title = "New Chat"]) async {
+  Future<Conversation> createNewConversation({
+    String title = "New Chat",
+    int? budId,
+  }) async {
     final newConv = Conversation(
       title: title,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
+      budId: budId,
     );
     final id = await saveConversation(newConv);
     final saved = await getConversation(id);
@@ -97,6 +101,7 @@ class ChatRepository {
         role: userMessage.role,
         status: userMessage.status,
         createdAt: userMessage.createdAt,
+        budId: userMessage.budId,
       );
       final persistedAssistantMessage = Message(
         conversationId: conversationId,
@@ -104,6 +109,7 @@ class ChatRepository {
         role: assistantMessage.role,
         status: assistantMessage.status,
         createdAt: assistantMessage.createdAt,
+        budId: assistantMessage.budId,
       );
       persistedUserMessage.id = await isar.messages.put(persistedUserMessage);
       persistedAssistantMessage.id =

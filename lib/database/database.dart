@@ -4,6 +4,7 @@ import 'package:chatbud/models/app_settings.dart';
 import 'package:chatbud/models/bud.dart';
 import 'package:chatbud/models/conversation.dart';
 import 'package:chatbud/models/message.dart';
+import 'package:chatbud/repositories/bud_repository.dart';
 
 class AppDatabase {
   late final Isar isar;
@@ -20,5 +21,9 @@ class AppDatabase {
       ],
       directory: dir.path,
     );
+
+    // Seed default Buds if database is fresh
+    final budRepo = BudRepository(isar);
+    await budRepo.seedDefaultBuds();
   }
 }

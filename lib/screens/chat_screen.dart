@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:chatbud/models/bud.dart';
 import 'package:chatbud/models/conversation.dart';
 import 'package:chatbud/models/message.dart';
+import 'package:chatbud/repositories/bud_repository.dart';
 import 'package:chatbud/repositories/chat_repository.dart';
 import 'package:chatbud/services/llm_service.dart';
+import 'package:chatbud/widgets/bud_selector.dart';
 import 'package:chatbud/widgets/chat_input.dart';
 import 'package:chatbud/widgets/message_bubble.dart';
 import 'package:provider/provider.dart';
@@ -23,7 +26,9 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   late ChatRepository _chatRepository;
+  late BudRepository _budRepository;
   Conversation? _currentConversation;
+  Bud? _activeBud; // null = No Bud / Raw LLM
   List<Message> _messages = [];
   bool _isLoading = true;
   bool _isSubmitting = false;
@@ -48,16 +53,17 @@ class _ChatScreenState extends State<ChatScreen> {
     super.didChangeDependencies();
     if (_isLoading) {
       _chatRepository = Provider.of<ChatRepository>(context, listen: false);
+      _budRepository = Provider.of<BudRepository>(context, listen: false);
       _loadActiveConversationAndMessages();
     }
   }
 
   Future<void> _loadActiveConversationAndMessages() async {
+    Bud? loadedBud;
     if (widget.conversation != null) {
       final savedMessages =
           await _chatRepository.getMessagesForConversation(widget.conversation!.id);
 
-      // Recover any pending/interrupted messages from disk
       for (int i = 0; i < savedMessages.length; i++) {
         final msg = savedMessages[i];
         if (msg.status == MessageStatus.pending) {
@@ -68,28 +74,50 @@ class _ChatScreenState extends State<ChatScreen> {
             role: msg.role,
             status: MessageStatus.failed,
             createdAt: msg.createdAt,
+            budId: msg.budId,
           );
           savedMessages[i] = recovered;
           await _chatRepository.saveMessageAndTouchConversation(recovered);
         }
       }
 
+      if (widget.conversation!.budId != null) {
+        loadedBud = await _budRepository.getBud(widget.conversation!.budId!);
+      }
+
       if (mounted) {
         setState(() {
           _currentConversation = widget.conversation;
           _messages = savedMessages;
-          _isLoading = false;
         });
       }
-    } else {
-      // New unsaved chat: start with empty messages and DO NOT create database row yet!
-      if (mounted) {
-        setState(() {
-          _currentConversation = null;
-          _messages = [];
-          _isLoading = false;
-        });
-      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _activeBud = loadedBud; // New chat or deleted Bud -> null (No Bud / Raw LLM)
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _onBudChanged(Bud? newBud) async {
+    setState(() {
+      _activeBud = newBud;
+    });
+
+    if (_currentConversation != null) {
+      final updatedConv = newBud == null
+          ? _currentConversation!.copyWith(
+              clearBudId: true,
+              updatedAt: DateTime.now(),
+            )
+          : _currentConversation!.copyWith(
+              budId: newBud.id,
+              updatedAt: DateTime.now(),
+            );
+      _currentConversation = updatedConv;
+      await _chatRepository.saveConversation(updatedConv);
     }
   }
 
@@ -121,13 +149,12 @@ class _ChatScreenState extends State<ChatScreen> {
     if (prompt.isEmpty) return;
 
     final isNewConversation = _currentConversation == null;
-    _isSubmitting = true; // Set synchronously to block duplicate taps.
+    _isSubmitting = true;
     setState(() {});
     _textController.clear();
     final now = DateTime.now();
 
     try {
-      // Lazy conversation creation on first prompt send
       if (_currentConversation == null) {
         final title =
             prompt.length > 25 ? "${prompt.substring(0, 25)}..." : prompt;
@@ -135,11 +162,18 @@ class _ChatScreenState extends State<ChatScreen> {
           title: title,
           createdAt: now,
           updatedAt: now,
+          budId: _activeBud?.id,
         );
       } else {
-        _currentConversation = _currentConversation!.copyWith(
-          updatedAt: now,
-        );
+        _currentConversation = _activeBud == null
+            ? _currentConversation!.copyWith(
+                clearBudId: true,
+                updatedAt: now,
+              )
+            : _currentConversation!.copyWith(
+                budId: _activeBud!.id,
+                updatedAt: now,
+              );
       }
 
       final userMessage = Message(
@@ -155,9 +189,9 @@ class _ChatScreenState extends State<ChatScreen> {
         role: MessageRole.assistant,
         status: MessageStatus.pending,
         createdAt: now,
+        budId: _activeBud?.id,
       );
 
-      // Persist conversation, user message, and assistant placeholder atomically
       final savedMessages = await _chatRepository.saveMessagePairAndTouchConversation(
         conversation: _currentConversation!,
         userMessage: userMessage,
@@ -187,8 +221,12 @@ class _ChatScreenState extends State<ChatScreen> {
       var lastPublished = DateTime.fromMillisecondsSinceEpoch(0);
       MessageStatus finalStatus;
       String finalText;
+
       try {
-        await for (final token in _llmService.generate(prompt)) {
+        await for (final token in _llmService.generate(
+          prompt: prompt,
+          systemPrompt: _activeBud?.systemPrompt,
+        )) {
           if (!mounted) return;
           response.write(token);
           final currentTime = DateTime.now();
@@ -246,9 +284,9 @@ class _ChatScreenState extends State<ChatScreen> {
         role: oldMessage.role,
         status: status,
         createdAt: oldMessage.createdAt,
+        budId: oldMessage.budId,
       );
 
-      // Save final message text to Isar database
       try {
         await _chatRepository.saveMessageAndTouchConversation(updatedMsg);
       } catch (error, stackTrace) {
@@ -260,7 +298,7 @@ class _ChatScreenState extends State<ChatScreen> {
           });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("The response could not be saved. It will be recovered when you reopen this chat."),
+              content: Text("The response could not be saved."),
             ),
           );
         }
@@ -306,6 +344,22 @@ class _ChatScreenState extends State<ChatScreen> {
 
     return Column(
       children: [
+        // Bud Selector Header Bar
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          alignment: Alignment.centerLeft,
+          color: Theme.of(context).colorScheme.surface,
+          child: Row(
+            children: [
+              BudSelectorChip(
+                activeBud: _activeBud,
+                onBudSelected: _onBudChanged,
+              ),
+              const Spacer(),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
         Expanded(
           child: Stack(
             children: [
@@ -322,12 +376,12 @@ class _ChatScreenState extends State<ChatScreen> {
                             ),
                         textAlign: TextAlign.center,
                       ),
+                      const SizedBox(height: 4),
                       Text(
-                        "Your personal AI, always on your device.",
+                        "Active Mode: ${_activeBud?.name ?? 'No Bud (Raw LLM)'}",
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.normal,
-                              fontStyle: FontStyle.italic,
-                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.secondary,
                             ),
                         textAlign: TextAlign.center,
                       ),
@@ -370,8 +424,4 @@ class _ChatScreenState extends State<ChatScreen> {
       ],
     );
   }
-}
-
-int _newMessageId() {
-  return DateTime.now().microsecondsSinceEpoch;
 }

@@ -17,35 +17,40 @@ const MessageSchema = CollectionSchema(
   name: r'Message',
   id: 2463283977299753079,
   properties: {
-    r'conversationId': PropertySchema(
+    r'budId': PropertySchema(
       id: 0,
+      name: r'budId',
+      type: IsarType.long,
+    ),
+    r'conversationId': PropertySchema(
+      id: 1,
       name: r'conversationId',
       type: IsarType.long,
     ),
     r'createdAt': PropertySchema(
-      id: 1,
+      id: 2,
       name: r'createdAt',
       type: IsarType.dateTime,
     ),
     r'isUser': PropertySchema(
-      id: 2,
+      id: 3,
       name: r'isUser',
       type: IsarType.bool,
     ),
     r'role': PropertySchema(
-      id: 3,
+      id: 4,
       name: r'role',
       type: IsarType.string,
       enumMap: _MessageroleEnumValueMap,
     ),
     r'status': PropertySchema(
-      id: 4,
+      id: 5,
       name: r'status',
       type: IsarType.string,
       enumMap: _MessagestatusEnumValueMap,
     ),
     r'text': PropertySchema(
-      id: 5,
+      id: 6,
       name: r'text',
       type: IsarType.string,
     )
@@ -82,12 +87,13 @@ void _messageSerialize(
   List<int> offsets,
   Map<Type, List<int>> allOffsets,
 ) {
-  writer.writeLong(offsets[0], object.conversationId);
-  writer.writeDateTime(offsets[1], object.createdAt);
-  writer.writeBool(offsets[2], object.isUser);
-  writer.writeString(offsets[3], object.role.name);
-  writer.writeString(offsets[4], object.status.name);
-  writer.writeString(offsets[5], object.text);
+  writer.writeLong(offsets[0], object.budId);
+  writer.writeLong(offsets[1], object.conversationId);
+  writer.writeDateTime(offsets[2], object.createdAt);
+  writer.writeBool(offsets[3], object.isUser);
+  writer.writeString(offsets[4], object.role.name);
+  writer.writeString(offsets[5], object.status.name);
+  writer.writeString(offsets[6], object.text);
 }
 
 Message _messageDeserialize(
@@ -97,14 +103,15 @@ Message _messageDeserialize(
   Map<Type, List<int>> allOffsets,
 ) {
   final object = Message(
-    conversationId: reader.readLong(offsets[0]),
-    createdAt: reader.readDateTime(offsets[1]),
+    budId: reader.readLongOrNull(offsets[0]),
+    conversationId: reader.readLong(offsets[1]),
+    createdAt: reader.readDateTime(offsets[2]),
     id: id,
-    role: _MessageroleValueEnumMap[reader.readStringOrNull(offsets[3])] ??
+    role: _MessageroleValueEnumMap[reader.readStringOrNull(offsets[4])] ??
         MessageRole.user,
-    status: _MessagestatusValueEnumMap[reader.readStringOrNull(offsets[4])] ??
+    status: _MessagestatusValueEnumMap[reader.readStringOrNull(offsets[5])] ??
         MessageStatus.completed,
-    text: reader.readString(offsets[5]),
+    text: reader.readString(offsets[6]),
   );
   return object;
 }
@@ -117,18 +124,20 @@ P _messageDeserializeProp<P>(
 ) {
   switch (propertyId) {
     case 0:
-      return (reader.readLong(offset)) as P;
+      return (reader.readLongOrNull(offset)) as P;
     case 1:
-      return (reader.readDateTime(offset)) as P;
+      return (reader.readLong(offset)) as P;
     case 2:
-      return (reader.readBool(offset)) as P;
+      return (reader.readDateTime(offset)) as P;
     case 3:
+      return (reader.readBool(offset)) as P;
+    case 4:
       return (_MessageroleValueEnumMap[reader.readStringOrNull(offset)] ??
           MessageRole.user) as P;
-    case 4:
+    case 5:
       return (_MessagestatusValueEnumMap[reader.readStringOrNull(offset)] ??
           MessageStatus.completed) as P;
-    case 5:
+    case 6:
       return (reader.readString(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -245,6 +254,75 @@ extension MessageQueryWhere on QueryBuilder<Message, Message, QWhereClause> {
 
 extension MessageQueryFilter
     on QueryBuilder<Message, Message, QFilterCondition> {
+  QueryBuilder<Message, Message, QAfterFilterCondition> budIdIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNull(
+        property: r'budId',
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> budIdIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNotNull(
+        property: r'budId',
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> budIdEqualTo(
+      int? value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'budId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> budIdGreaterThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'budId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> budIdLessThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'budId',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterFilterCondition> budIdBetween(
+    int? lower,
+    int? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'budId',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
   QueryBuilder<Message, Message, QAfterFilterCondition> conversationIdEqualTo(
       int value) {
     return QueryBuilder.apply(this, (query) {
@@ -812,6 +890,18 @@ extension MessageQueryLinks
     on QueryBuilder<Message, Message, QFilterCondition> {}
 
 extension MessageQuerySortBy on QueryBuilder<Message, Message, QSortBy> {
+  QueryBuilder<Message, Message, QAfterSortBy> sortByBudId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'budId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterSortBy> sortByBudIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'budId', Sort.desc);
+    });
+  }
+
   QueryBuilder<Message, Message, QAfterSortBy> sortByConversationId() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'conversationId', Sort.asc);
@@ -887,6 +977,18 @@ extension MessageQuerySortBy on QueryBuilder<Message, Message, QSortBy> {
 
 extension MessageQuerySortThenBy
     on QueryBuilder<Message, Message, QSortThenBy> {
+  QueryBuilder<Message, Message, QAfterSortBy> thenByBudId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'budId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Message, Message, QAfterSortBy> thenByBudIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'budId', Sort.desc);
+    });
+  }
+
   QueryBuilder<Message, Message, QAfterSortBy> thenByConversationId() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'conversationId', Sort.asc);
@@ -974,6 +1076,12 @@ extension MessageQuerySortThenBy
 
 extension MessageQueryWhereDistinct
     on QueryBuilder<Message, Message, QDistinct> {
+  QueryBuilder<Message, Message, QDistinct> distinctByBudId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'budId');
+    });
+  }
+
   QueryBuilder<Message, Message, QDistinct> distinctByConversationId() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'conversationId');
@@ -1019,6 +1127,12 @@ extension MessageQueryProperty
   QueryBuilder<Message, int, QQueryOperations> idProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'id');
+    });
+  }
+
+  QueryBuilder<Message, int?, QQueryOperations> budIdProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'budId');
     });
   }
 

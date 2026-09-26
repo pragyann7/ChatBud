@@ -27,6 +27,7 @@ class Conversation {
     DateTime? updatedAt,
     bool? isPinned,
     int? budId,
+    bool clearBudId = false,
   }) {
     return Conversation(
       id: id ?? this.id,
@@ -34,7 +35,7 @@ class Conversation {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       isPinned: isPinned ?? this.isPinned,
-      budId: budId ?? this.budId,
+      budId: clearBudId ? null : (budId ?? this.budId),
     );
   }
 }

@@ -17,13 +17,23 @@ const BudSchema = CollectionSchema(
   name: r'Bud',
   id: -5907598319411133192,
   properties: {
-    r'name': PropertySchema(
+    r'iconName': PropertySchema(
       id: 0,
+      name: r'iconName',
+      type: IsarType.string,
+    ),
+    r'isDefault': PropertySchema(
+      id: 1,
+      name: r'isDefault',
+      type: IsarType.bool,
+    ),
+    r'name': PropertySchema(
+      id: 2,
       name: r'name',
       type: IsarType.string,
     ),
     r'systemPrompt': PropertySchema(
-      id: 1,
+      id: 3,
       name: r'systemPrompt',
       type: IsarType.string,
     )
@@ -48,6 +58,7 @@ int _budEstimateSize(
   Map<Type, List<int>> allOffsets,
 ) {
   var bytesCount = offsets.last;
+  bytesCount += 3 + object.iconName.length * 3;
   bytesCount += 3 + object.name.length * 3;
   bytesCount += 3 + object.systemPrompt.length * 3;
   return bytesCount;
@@ -59,8 +70,10 @@ void _budSerialize(
   List<int> offsets,
   Map<Type, List<int>> allOffsets,
 ) {
-  writer.writeString(offsets[0], object.name);
-  writer.writeString(offsets[1], object.systemPrompt);
+  writer.writeString(offsets[0], object.iconName);
+  writer.writeBool(offsets[1], object.isDefault);
+  writer.writeString(offsets[2], object.name);
+  writer.writeString(offsets[3], object.systemPrompt);
 }
 
 Bud _budDeserialize(
@@ -70,9 +83,11 @@ Bud _budDeserialize(
   Map<Type, List<int>> allOffsets,
 ) {
   final object = Bud(
+    iconName: reader.readStringOrNull(offsets[0]) ?? 'smart_toy',
     id: id,
-    name: reader.readString(offsets[0]),
-    systemPrompt: reader.readString(offsets[1]),
+    isDefault: reader.readBoolOrNull(offsets[1]) ?? false,
+    name: reader.readString(offsets[2]),
+    systemPrompt: reader.readString(offsets[3]),
   );
   return object;
 }
@@ -85,8 +100,12 @@ P _budDeserializeProp<P>(
 ) {
   switch (propertyId) {
     case 0:
-      return (reader.readString(offset)) as P;
+      return (reader.readStringOrNull(offset) ?? 'smart_toy') as P;
     case 1:
+      return (reader.readBoolOrNull(offset) ?? false) as P;
+    case 2:
+      return (reader.readString(offset)) as P;
+    case 3:
       return (reader.readString(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -181,6 +200,134 @@ extension BudQueryWhere on QueryBuilder<Bud, Bud, QWhereClause> {
 }
 
 extension BudQueryFilter on QueryBuilder<Bud, Bud, QFilterCondition> {
+  QueryBuilder<Bud, Bud, QAfterFilterCondition> iconNameEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'iconName',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterFilterCondition> iconNameGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'iconName',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterFilterCondition> iconNameLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'iconName',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterFilterCondition> iconNameBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'iconName',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterFilterCondition> iconNameStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'iconName',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterFilterCondition> iconNameEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'iconName',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterFilterCondition> iconNameContains(String value,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'iconName',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterFilterCondition> iconNameMatches(String pattern,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'iconName',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterFilterCondition> iconNameIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'iconName',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterFilterCondition> iconNameIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'iconName',
+        value: '',
+      ));
+    });
+  }
+
   QueryBuilder<Bud, Bud, QAfterFilterCondition> idEqualTo(Id value) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.equalTo(
@@ -229,6 +376,15 @@ extension BudQueryFilter on QueryBuilder<Bud, Bud, QFilterCondition> {
         includeLower: includeLower,
         upper: upper,
         includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterFilterCondition> isDefaultEqualTo(bool value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'isDefault',
+        value: value,
       ));
     });
   }
@@ -497,6 +653,30 @@ extension BudQueryObject on QueryBuilder<Bud, Bud, QFilterCondition> {}
 extension BudQueryLinks on QueryBuilder<Bud, Bud, QFilterCondition> {}
 
 extension BudQuerySortBy on QueryBuilder<Bud, Bud, QSortBy> {
+  QueryBuilder<Bud, Bud, QAfterSortBy> sortByIconName() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'iconName', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterSortBy> sortByIconNameDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'iconName', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterSortBy> sortByIsDefault() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isDefault', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterSortBy> sortByIsDefaultDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isDefault', Sort.desc);
+    });
+  }
+
   QueryBuilder<Bud, Bud, QAfterSortBy> sortByName() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'name', Sort.asc);
@@ -523,6 +703,18 @@ extension BudQuerySortBy on QueryBuilder<Bud, Bud, QSortBy> {
 }
 
 extension BudQuerySortThenBy on QueryBuilder<Bud, Bud, QSortThenBy> {
+  QueryBuilder<Bud, Bud, QAfterSortBy> thenByIconName() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'iconName', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterSortBy> thenByIconNameDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'iconName', Sort.desc);
+    });
+  }
+
   QueryBuilder<Bud, Bud, QAfterSortBy> thenById() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'id', Sort.asc);
@@ -532,6 +724,18 @@ extension BudQuerySortThenBy on QueryBuilder<Bud, Bud, QSortThenBy> {
   QueryBuilder<Bud, Bud, QAfterSortBy> thenByIdDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'id', Sort.desc);
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterSortBy> thenByIsDefault() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isDefault', Sort.asc);
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QAfterSortBy> thenByIsDefaultDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isDefault', Sort.desc);
     });
   }
 
@@ -561,6 +765,19 @@ extension BudQuerySortThenBy on QueryBuilder<Bud, Bud, QSortThenBy> {
 }
 
 extension BudQueryWhereDistinct on QueryBuilder<Bud, Bud, QDistinct> {
+  QueryBuilder<Bud, Bud, QDistinct> distinctByIconName(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'iconName', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<Bud, Bud, QDistinct> distinctByIsDefault() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'isDefault');
+    });
+  }
+
   QueryBuilder<Bud, Bud, QDistinct> distinctByName(
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
@@ -580,6 +797,18 @@ extension BudQueryProperty on QueryBuilder<Bud, Bud, QQueryProperty> {
   QueryBuilder<Bud, int, QQueryOperations> idProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'id');
+    });
+  }
+
+  QueryBuilder<Bud, String, QQueryOperations> iconNameProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'iconName');
+    });
+  }
+
+  QueryBuilder<Bud, bool, QQueryOperations> isDefaultProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'isDefault');
     });
   }
 

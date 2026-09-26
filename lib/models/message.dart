@@ -27,6 +27,7 @@ class Message {
   final MessageStatus status;
 
   final DateTime createdAt;
+  final int? budId;
 
   Message({
     this.id = Isar.autoIncrement,
@@ -35,6 +36,7 @@ class Message {
     required this.role,
     this.status = MessageStatus.completed,
     required this.createdAt,
+    this.budId,
   });
 
   bool get isUser => role == MessageRole.user;

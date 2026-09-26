@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:chatbud/database/database.dart';
 import 'package:chatbud/models/conversation.dart';
+import 'package:chatbud/repositories/bud_repository.dart';
 import 'package:chatbud/repositories/chat_repository.dart';
+import 'package:chatbud/repositories/settings_repository.dart';
+import 'package:chatbud/screens/buds_screen.dart';
 import 'package:chatbud/screens/chat_screen.dart';
 import 'package:provider/provider.dart';
 
@@ -10,13 +13,17 @@ Future<void> main() async {
   final database = AppDatabase();
   await database.initialize();
 
-  final repository = ChatRepository(database.isar);
+  final chatRepository = ChatRepository(database.isar);
+  final budRepository = BudRepository(database.isar);
+  final settingsRepository = SettingsRepository(database.isar);
 
   runApp(
     MultiProvider(
       providers: [
         Provider<AppDatabase>.value(value: database),
-        Provider<ChatRepository>.value(value: repository),
+        Provider<ChatRepository>.value(value: chatRepository),
+        Provider<BudRepository>.value(value: budRepository),
+        Provider<SettingsRepository>.value(value: settingsRepository),
       ],
       child: const MyApp(),
     ),
@@ -73,7 +80,6 @@ class _MyHomePageState extends State<MyHomePage> {
     final repository = Provider.of<ChatRepository>(context, listen: false);
     await repository.deleteConversation(conversation.id);
 
-    // If the active conversation was deleted, reset to a new chat screen
     if (_activeConversation?.id == conversation.id) {
       setState(() {
         _activeConversation = null;
@@ -102,7 +108,7 @@ class _MyHomePageState extends State<MyHomePage> {
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const Text(
-              "Model Name",
+              "Local LLM • Isar DB",
               style: TextStyle(fontSize: 12),
             ),
           ],
@@ -111,12 +117,7 @@ class _MyHomePageState extends State<MyHomePage> {
           IconButton(
             tooltip: "New Chat",
             onPressed: _startNewChat,
-            icon: Icon(Icons.edit_note),
-          ),
-          IconButton(
-            tooltip: "More",
-            onPressed: _startNewChat,
-            icon: Icon(Icons.more_vert),
+            icon: const Icon(Icons.edit_note),
           ),
         ],
       ),
@@ -283,7 +284,7 @@ class AppDrawer extends StatelessWidget {
                 title: Text(
                   "ChatBud",
                   style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.normal,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
                 onTap: () {
@@ -298,14 +299,15 @@ class AppDrawer extends StatelessWidget {
               onTap: () => Navigator.pop(context),
             ),
             ListTile(
-              leading: Image.asset("assets/buds.png", width: 24, height: 24),
-              title: const Text("Buds"),
-              onTap: () => Navigator.pop(context),
-            ),
-            ListTile(
-              leading: Image.asset("assets/models.png", width: 24, height: 24),
-              title: const Text("Models"),
-              onTap: () => Navigator.pop(context),
+              leading: const Icon(Icons.psychology_outlined),
+              title: const Text("Buds (AI Personalities)"),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const BudsScreen()),
+                );
+              },
             ),
             Divider(
               indent: 16,
@@ -519,15 +521,6 @@ class AppDrawer extends StatelessWidget {
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    tooltip: "Settings",
-                    onPressed: () {
-                      Navigator.pop(context);
-                      // TODO: Navigate to Settings screen
-                    },
-                    icon: const Icon(Icons.settings),
                   ),
                 ],
               ),
