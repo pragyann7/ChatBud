@@ -42,6 +42,11 @@ class SettingsRepository {
 
   Future<void> updateSelectedModel(String? newModel) async {
     final current = await getSettings();
-    await saveSettings(current.copyWith(selectedModel: newModel));
+    await saveSettings(
+      current.copyWith(
+        selectedModel: newModel,
+        clearSelectedModel: newModel == null,
+      ),
+    );
   }
 }

@@ -64,44 +64,59 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _loadActiveConversationAndMessages() async {
     Bud? loadedBud;
-    if (widget.conversation != null) {
-      final savedMessages =
-          await _messageRepository.getMessagesForConversation(widget.conversation!.id);
+    try {
+      if (widget.conversation != null) {
+        // Use indexed paginated query for initial history load
+        final savedMessages = await _messageRepository
+            .getMessagesForConversationPaginated(widget.conversation!.id, limit: 50, offset: 0);
 
-      for (int i = 0; i < savedMessages.length; i++) {
-        final msg = savedMessages[i];
-        if (msg.status == MessageStatus.pending) {
-          final recovered = Message(
-            id: msg.id,
-            conversationId: msg.conversationId,
-            text: msg.text.isEmpty ? "Response interrupted." : msg.text,
-            role: msg.role,
-            status: MessageStatus.failed,
-            createdAt: msg.createdAt,
-            budId: msg.budId,
-          );
-          savedMessages[i] = recovered;
-          await _messageRepository.saveMessageAndTouchConversation(recovered);
+        for (int i = 0; i < savedMessages.length; i++) {
+          final msg = savedMessages[i];
+          if (msg.status == MessageStatus.pending) {
+            final recovered = Message(
+              id: msg.id,
+              conversationId: msg.conversationId,
+              text: msg.text.isEmpty ? "Response interrupted." : msg.text,
+              role: msg.role,
+              status: MessageStatus.failed,
+              createdAt: msg.createdAt,
+              budId: msg.budId,
+            );
+            savedMessages[i] = recovered;
+            await _messageRepository.saveMessageAndTouchConversation(recovered);
+          }
+        }
+
+        if (widget.conversation!.budId != null) {
+          loadedBud = await _budRepository.getBud(widget.conversation!.budId!);
+          if (loadedBud == null) {
+            // Referenced Bud was deleted! Auto-repair conversation reference to null
+            final repaired = widget.conversation!.copyWith(clearBudId: true);
+            await _conversationRepository.saveConversation(repaired);
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            _currentConversation = widget.conversation;
+            _messages = savedMessages;
+          });
         }
       }
-
-      if (widget.conversation!.budId != null) {
-        loadedBud = await _budRepository.getBud(widget.conversation!.budId!);
+    } catch (e) {
+      debugPrint("Failed to load active conversation messages: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Failed to load chat history: $e")),
+        );
       }
-
+    } finally {
       if (mounted) {
         setState(() {
-          _currentConversation = widget.conversation;
-          _messages = savedMessages;
+          _activeBud = loadedBud; // New chat or deleted Bud -> null (No Bud / Raw LLM)
+          _isLoading = false;
         });
       }
-    }
-
-    if (mounted) {
-      setState(() {
-        _activeBud = loadedBud; // New chat or deleted Bud -> null (No Bud / Raw LLM)
-        _isLoading = false;
-      });
     }
   }
 
@@ -121,7 +136,15 @@ class _ChatScreenState extends State<ChatScreen> {
               updatedAt: DateTime.now(),
             );
       _currentConversation = updatedConv;
-      await _conversationRepository.saveConversation(updatedConv);
+      try {
+        await _conversationRepository.saveConversation(updatedConv);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Failed to update Bud setting: $e")),
+          );
+        }
+      }
     }
   }
 
@@ -202,6 +225,11 @@ class _ChatScreenState extends State<ChatScreen> {
         assistantMessage: assistantMessage,
       );
 
+      if (savedMessages == null || savedMessages.length < 2) {
+        // Parent conversation deleted or save failed
+        return;
+      }
+
       widget.onConversationCreated?.call(_currentConversation!);
 
       final savedUserMessage = savedMessages[0];
@@ -231,7 +259,10 @@ class _ChatScreenState extends State<ChatScreen> {
           prompt: prompt,
           systemPrompt: _activeBud?.systemPrompt,
         )) {
-          if (!mounted) return;
+          if (!mounted || !_activeMessageIds.contains(assistantId)) {
+            // Generation cancelled or conversation deleted
+            return;
+          }
           response.write(token);
           final currentTime = DateTime.now();
           if (currentTime.difference(lastPublished).inMilliseconds >= 16) {
@@ -239,19 +270,19 @@ class _ChatScreenState extends State<ChatScreen> {
             lastPublished = currentTime;
           }
         }
-        if (!mounted) return;
+        if (!mounted || !_activeMessageIds.contains(assistantId)) return;
         notifier.value = response.toString();
         finalStatus = MessageStatus.completed;
         finalText = response.toString();
       } catch (error, stackTrace) {
         debugPrint("Chat response stream failed: $error\n$stackTrace");
-        if (!mounted) return;
+        if (!mounted || !_activeMessageIds.contains(assistantId)) return;
         finalStatus = MessageStatus.failed;
         finalText = response.isEmpty
             ? "Sorry, I couldn’t finish that response. Please try again."
             : response.toString();
       }
-      if (!mounted) return;
+      if (!mounted || !_activeMessageIds.contains(assistantId)) return;
       notifier.value = finalText;
       await _completeMessage(assistantId, finalText, finalStatus, notifier);
     } catch (error, stackTrace) {
@@ -292,7 +323,18 @@ class _ChatScreenState extends State<ChatScreen> {
       );
 
       try {
-        await _messageRepository.saveMessageAndTouchConversation(updatedMsg);
+        final savedId = await _messageRepository.saveMessageAndTouchConversation(updatedMsg);
+        if (savedId == null) {
+          // Parent conversation was deleted while generating! Cancel/discard.
+          if (mounted) {
+            setState(() {
+              _activeMessageIds.remove(messageId);
+              _streamingNotifiers.remove(messageId);
+            });
+          }
+          WidgetsBinding.instance.addPostFrameCallback((_) => notifier.dispose());
+          return;
+        }
       } catch (error, stackTrace) {
         debugPrint("Could not persist completed response: $error\n$stackTrace");
         if (mounted) {

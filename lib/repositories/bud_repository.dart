@@ -7,17 +7,17 @@ class BudRepository {
   BudRepository(this.isar);
 
   Future<void> seedDefaultBuds() async {
-    final count = await isar.buds.count();
-    if (count > 0) return;
-
     final defaultBuds = [
       Bud(
+        id: 1,
         name: "General Bud",
-        systemPrompt: "You are ChatBud, a helpful, friendly, and knowledgeable AI assistant.",
+        systemPrompt:
+            "You are ChatBud, a helpful, friendly, and knowledgeable AI assistant.",
         iconName: "smart_toy",
         isDefault: true,
       ),
       Bud(
+        id: 2,
         name: "Coding Bud",
         systemPrompt:
             "You are an expert programming assistant and software architect. Provide clean, efficient, well-documented code examples and concise explanations.",
@@ -25,6 +25,7 @@ class BudRepository {
         isDefault: true,
       ),
       Bud(
+        id: 3,
         name: "Study Bud",
         systemPrompt:
             "You are an encouraging and patient tutor. Explain complex concepts clearly using analogies, step-by-step guidance, and engaging questions.",
@@ -32,6 +33,7 @@ class BudRepository {
         isDefault: true,
       ),
       Bud(
+        id: 4,
         name: "Creative Bud",
         systemPrompt:
             "You are an imaginative creative writer and brainstorming partner. Help express ideas vividly with rich vocabulary and narrative flair.",
@@ -41,7 +43,12 @@ class BudRepository {
     ];
 
     await isar.writeTxn(() async {
-      await isar.buds.putAll(defaultBuds);
+      for (final bud in defaultBuds) {
+        final existing = await isar.buds.get(bud.id);
+        if (existing == null) {
+          await isar.buds.put(bud);
+        }
+      }
     });
   }
 
@@ -62,15 +69,16 @@ class BudRepository {
     if (buds.isNotEmpty) {
       return buds.firstWhere((b) => b.isDefault, orElse: () => buds.first);
     }
-    // Fallback if DB wasn't seeded yet
     final fallback = Bud(
+      id: 1,
       name: "General Bud",
-      systemPrompt: "You are ChatBud, a helpful, friendly, and knowledgeable AI assistant.",
+      systemPrompt:
+          "You are ChatBud, a helpful, friendly, and knowledgeable AI assistant.",
       iconName: "smart_toy",
       isDefault: true,
     );
-    final id = await saveBud(fallback);
-    return fallback.copyWith(id: id);
+    await saveBud(fallback);
+    return fallback;
   }
 
   Future<int> saveBud(Bud bud) async {

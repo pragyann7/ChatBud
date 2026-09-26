@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:isar/isar.dart';
 import 'package:chatbud/models/bud.dart';
 import 'package:chatbud/repositories/bud_repository.dart';
 import 'package:provider/provider.dart';
@@ -121,14 +122,22 @@ class BudsScreen extends StatelessWidget {
                     if (name.isEmpty || prompt.isEmpty) return;
 
                     final updatedBud = Bud(
-                      id: bud?.id ?? 0,
+                      id: bud?.id ?? Isar.autoIncrement,
                       name: name,
                       systemPrompt: prompt,
                       iconName: selectedIcon,
                       isDefault: bud?.isDefault ?? false,
                     );
 
-                    await budRepo.saveBud(updatedBud);
+                    try {
+                      await budRepo.saveBud(updatedBud);
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text("Failed to save Bud: $e")),
+                        );
+                      }
+                    }
                     if (dialogContext.mounted) {
                       Navigator.pop(dialogContext);
                     }
@@ -266,7 +275,15 @@ class BudsScreen extends StatelessWidget {
                                   ),
                                 );
                                 if (confirmed == true) {
-                                  await budRepo.deleteBud(bud.id);
+                                  try {
+                                    await budRepo.deleteBud(bud.id);
+                                  } catch (e) {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text("Failed to delete Bud: $e")),
+                                      );
+                                    }
+                                  }
                                 }
                               },
                             ),

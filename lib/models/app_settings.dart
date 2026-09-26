@@ -18,11 +18,13 @@ class AppSettings {
     Id? id,
     String? theme,
     String? selectedModel,
+    bool clearSelectedModel = false,
   }) {
     return AppSettings(
       id: id ?? this.id,
       theme: theme ?? this.theme,
-      selectedModel: selectedModel ?? this.selectedModel,
+      selectedModel:
+          clearSelectedModel ? null : (selectedModel ?? this.selectedModel),
     );
   }
 }

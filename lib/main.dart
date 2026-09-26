@@ -11,8 +11,21 @@ import 'package:provider/provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final database = AppDatabase();
-  await database.initialize();
+
+  AppDatabase? database;
+  Object? initError;
+
+  try {
+    database = AppDatabase();
+    await database.initialize();
+  } catch (e) {
+    initError = e;
+  }
+
+  if (initError != null || database == null) {
+    runApp(MyApp(initializationError: initError));
+    return;
+  }
 
   final conversationRepository = ConversationRepository(database.isar);
   final messageRepository = MessageRepository(database.isar);
@@ -34,7 +47,9 @@ Future<void> main() async {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final Object? initializationError;
+
+  const MyApp({super.key, this.initializationError});
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +62,40 @@ class MyApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const MyHomePage(),
+      home: initializationError != null
+          ? Scaffold(
+              body: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.error_outline_rounded,
+                        size: 48,
+                        color: Colors.red,
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        "Failed to initialize ChatBud Database",
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        "$initializationError",
+                        textAlign: TextAlign.center,
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          : const MyHomePage(),
     );
   }
 }
@@ -81,7 +129,16 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _deleteConversation(Conversation conversation) async {
     final conversationRepo = context.read<ConversationRepository>();
-    await conversationRepo.deleteConversation(conversation.id);
+    try {
+      await conversationRepo.deleteConversation(conversation.id);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Failed to delete chat: $e")),
+        );
+      }
+      return;
+    }
 
     if (_activeConversation?.id == conversation.id) {
       setState(() {
@@ -202,9 +259,17 @@ class AppDrawer extends StatelessWidget {
                       : Icons.push_pin_rounded,
                 ),
                 title: Text(conv.isPinned ? "Unpin chat" : "Pin chat"),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(context);
-                  conversationRepo.togglePinConversation(conv);
+                  try {
+                    await conversationRepo.togglePinConversation(conv);
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Failed to pin chat: $e")),
+                      );
+                    }
+                  }
                 },
               ),
               ListTile(
@@ -257,12 +322,22 @@ class AppDrawer extends StatelessWidget {
               child: const Text("Cancel"),
             ),
             ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 final newTitle = controller.text.trim();
                 if (newTitle.isNotEmpty) {
-                  conversationRepo.renameConversation(conv, newTitle);
+                  try {
+                    await conversationRepo.renameConversation(conv, newTitle);
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Failed to rename chat: $e")),
+                      );
+                    }
+                  }
                 }
-                Navigator.pop(context);
+                if (context.mounted) {
+                  Navigator.pop(context);
+                }
               },
               child: const Text("Save"),
             ),

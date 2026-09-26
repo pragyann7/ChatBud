@@ -17,7 +17,10 @@ enum MessageStatus {
 @collection
 class Message {
   Id id;
+
+  @Index()
   final int conversationId;
+
   final String text;
 
   @Enumerated(EnumType.name)
@@ -26,7 +29,9 @@ class Message {
   @Enumerated(EnumType.name)
   final MessageStatus status;
 
+  @Index()
   final DateTime createdAt;
+
   final int? budId;
 
   Message({
