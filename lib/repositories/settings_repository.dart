@@ -4,36 +4,44 @@ import 'package:chatbud/models/app_settings.dart';
 class SettingsRepository {
   final Isar isar;
 
+  static const int _settingsId = 1;
+
   SettingsRepository(this.isar);
 
   Future<AppSettings> getSettings() async {
-    final settings = await isar.appSettings.get(1);
+    final settings = await isar.appSettings.get(_settingsId);
     if (settings != null) return settings;
 
     final defaultSettings = AppSettings(
-      id: 1,
+      id: _settingsId,
       theme: 'system',
     );
-    await isar.writeTxn(() async {
-      await isar.appSettings.put(defaultSettings);
-    });
+    await saveSettings(defaultSettings);
     return defaultSettings;
   }
 
-  Stream<AppSettings?> watchSettings() {
-    return isar.appSettings.watchObject(1, fireImmediately: true);
-  }
-
-  Future<void> setSelectedBudId(int budId) async {
-    final current = await getSettings();
-    final updated = AppSettings(
-      id: 1,
-      theme: current.theme,
-      selectedBudId: budId,
-      selectedModel: current.selectedModel,
+  Future<void> saveSettings(AppSettings settings) async {
+    final settingsToSave = AppSettings(
+      id: _settingsId, // Enforce fixed ID 1
+      theme: settings.theme,
+      selectedModel: settings.selectedModel,
     );
     await isar.writeTxn(() async {
-      await isar.appSettings.put(updated);
+      await isar.appSettings.put(settingsToSave);
     });
+  }
+
+  Stream<AppSettings?> watchSettings() {
+    return isar.appSettings.watchObject(_settingsId, fireImmediately: true);
+  }
+
+  Future<void> updateTheme(String newTheme) async {
+    final current = await getSettings();
+    await saveSettings(current.copyWith(theme: newTheme));
+  }
+
+  Future<void> updateSelectedModel(String? newModel) async {
+    final current = await getSettings();
+    await saveSettings(current.copyWith(selectedModel: newModel));
   }
 }

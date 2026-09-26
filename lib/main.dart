@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:chatbud/database/database.dart';
 import 'package:chatbud/models/conversation.dart';
 import 'package:chatbud/repositories/bud_repository.dart';
-import 'package:chatbud/repositories/chat_repository.dart';
+import 'package:chatbud/repositories/conversation_repository.dart';
+import 'package:chatbud/repositories/message_repository.dart';
 import 'package:chatbud/repositories/settings_repository.dart';
 import 'package:chatbud/screens/buds_screen.dart';
 import 'package:chatbud/screens/chat_screen.dart';
@@ -13,7 +14,8 @@ Future<void> main() async {
   final database = AppDatabase();
   await database.initialize();
 
-  final chatRepository = ChatRepository(database.isar);
+  final conversationRepository = ConversationRepository(database.isar);
+  final messageRepository = MessageRepository(database.isar);
   final budRepository = BudRepository(database.isar);
   final settingsRepository = SettingsRepository(database.isar);
 
@@ -21,7 +23,8 @@ Future<void> main() async {
     MultiProvider(
       providers: [
         Provider<AppDatabase>.value(value: database),
-        Provider<ChatRepository>.value(value: chatRepository),
+        Provider<ConversationRepository>.value(value: conversationRepository),
+        Provider<MessageRepository>.value(value: messageRepository),
         Provider<BudRepository>.value(value: budRepository),
         Provider<SettingsRepository>.value(value: settingsRepository),
       ],
@@ -77,8 +80,8 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _deleteConversation(Conversation conversation) async {
-    final repository = Provider.of<ChatRepository>(context, listen: false);
-    await repository.deleteConversation(conversation.id);
+    final conversationRepo = context.read<ConversationRepository>();
+    await conversationRepo.deleteConversation(conversation.id);
 
     if (_activeConversation?.id == conversation.id) {
       setState(() {
@@ -151,7 +154,7 @@ class AppDrawer extends StatelessWidget {
   });
 
   void _showConversationOptions(BuildContext context, Conversation conv) {
-    final repository = Provider.of<ChatRepository>(context, listen: false);
+    final conversationRepo = context.read<ConversationRepository>();
     final theme = Theme.of(context);
 
     showModalBottomSheet(
@@ -201,7 +204,7 @@ class AppDrawer extends StatelessWidget {
                 title: Text(conv.isPinned ? "Unpin chat" : "Pin chat"),
                 onTap: () {
                   Navigator.pop(context);
-                  repository.togglePinConversation(conv);
+                  conversationRepo.togglePinConversation(conv);
                 },
               ),
               ListTile(
@@ -233,7 +236,7 @@ class AppDrawer extends StatelessWidget {
   }
 
   void _showRenameDialog(BuildContext context, Conversation conv) {
-    final repository = Provider.of<ChatRepository>(context, listen: false);
+    final conversationRepo = context.read<ConversationRepository>();
     final controller = TextEditingController(text: conv.title);
 
     showDialog(
@@ -257,7 +260,7 @@ class AppDrawer extends StatelessWidget {
               onPressed: () {
                 final newTitle = controller.text.trim();
                 if (newTitle.isNotEmpty) {
-                  repository.renameConversation(conv, newTitle);
+                  conversationRepo.renameConversation(conv, newTitle);
                 }
                 Navigator.pop(context);
               },
@@ -271,7 +274,7 @@ class AppDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final repository = Provider.of<ChatRepository>(context, listen: false);
+    final conversationRepo = context.read<ConversationRepository>();
     final theme = Theme.of(context);
 
     return Drawer(
@@ -318,7 +321,7 @@ class AppDrawer extends StatelessWidget {
             ),
             Expanded(
               child: StreamBuilder<List<Conversation>>(
-                stream: repository.watchConversations(),
+                stream: conversationRepo.watchConversations(),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
                     return const Center(child: CircularProgressIndicator());

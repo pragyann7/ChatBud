@@ -25,7 +25,7 @@ class BudsScreen extends StatelessWidget {
   }
 
   void _showAddOrEditBudDialog(BuildContext context, {Bud? bud}) {
-    final budRepo = Provider.of<BudRepository>(context, listen: false);
+    final budRepo = context.read<BudRepository>();
     final isEditing = bud != null;
 
     final nameController = TextEditingController(text: bud?.name ?? "");
@@ -145,7 +145,7 @@ class BudsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final budRepo = Provider.of<BudRepository>(context, listen: false);
+    final budRepo = context.read<BudRepository>();
     final theme = Theme.of(context);
 
     return Scaffold(

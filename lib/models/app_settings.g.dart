@@ -17,18 +17,13 @@ const AppSettingsSchema = CollectionSchema(
   name: r'AppSettings',
   id: -5633561779022347008,
   properties: {
-    r'selectedBudId': PropertySchema(
-      id: 0,
-      name: r'selectedBudId',
-      type: IsarType.long,
-    ),
     r'selectedModel': PropertySchema(
-      id: 1,
+      id: 0,
       name: r'selectedModel',
       type: IsarType.string,
     ),
     r'theme': PropertySchema(
-      id: 2,
+      id: 1,
       name: r'theme',
       type: IsarType.string,
     )
@@ -69,9 +64,8 @@ void _appSettingsSerialize(
   List<int> offsets,
   Map<Type, List<int>> allOffsets,
 ) {
-  writer.writeLong(offsets[0], object.selectedBudId);
-  writer.writeString(offsets[1], object.selectedModel);
-  writer.writeString(offsets[2], object.theme);
+  writer.writeString(offsets[0], object.selectedModel);
+  writer.writeString(offsets[1], object.theme);
 }
 
 AppSettings _appSettingsDeserialize(
@@ -82,9 +76,8 @@ AppSettings _appSettingsDeserialize(
 ) {
   final object = AppSettings(
     id: id,
-    selectedBudId: reader.readLongOrNull(offsets[0]),
-    selectedModel: reader.readStringOrNull(offsets[1]),
-    theme: reader.readString(offsets[2]),
+    selectedModel: reader.readStringOrNull(offsets[0]),
+    theme: reader.readStringOrNull(offsets[1]) ?? 'system',
   );
   return object;
 }
@@ -97,11 +90,9 @@ P _appSettingsDeserializeProp<P>(
 ) {
   switch (propertyId) {
     case 0:
-      return (reader.readLongOrNull(offset)) as P;
-    case 1:
       return (reader.readStringOrNull(offset)) as P;
-    case 2:
-      return (reader.readString(offset)) as P;
+    case 1:
+      return (reader.readStringOrNull(offset) ?? 'system') as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
   }
@@ -245,80 +236,6 @@ extension AppSettingsQueryFilter
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.between(
         property: r'id',
-        lower: lower,
-        includeLower: includeLower,
-        upper: upper,
-        includeUpper: includeUpper,
-      ));
-    });
-  }
-
-  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
-      selectedBudIdIsNull() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(const FilterCondition.isNull(
-        property: r'selectedBudId',
-      ));
-    });
-  }
-
-  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
-      selectedBudIdIsNotNull() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(const FilterCondition.isNotNull(
-        property: r'selectedBudId',
-      ));
-    });
-  }
-
-  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
-      selectedBudIdEqualTo(int? value) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(FilterCondition.equalTo(
-        property: r'selectedBudId',
-        value: value,
-      ));
-    });
-  }
-
-  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
-      selectedBudIdGreaterThan(
-    int? value, {
-    bool include = false,
-  }) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(FilterCondition.greaterThan(
-        include: include,
-        property: r'selectedBudId',
-        value: value,
-      ));
-    });
-  }
-
-  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
-      selectedBudIdLessThan(
-    int? value, {
-    bool include = false,
-  }) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(FilterCondition.lessThan(
-        include: include,
-        property: r'selectedBudId',
-        value: value,
-      ));
-    });
-  }
-
-  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
-      selectedBudIdBetween(
-    int? lower,
-    int? upper, {
-    bool includeLower = true,
-    bool includeUpper = true,
-  }) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(FilterCondition.between(
-        property: r'selectedBudId',
         lower: lower,
         includeLower: includeLower,
         upper: upper,
@@ -622,19 +539,6 @@ extension AppSettingsQueryLinks
 
 extension AppSettingsQuerySortBy
     on QueryBuilder<AppSettings, AppSettings, QSortBy> {
-  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> sortBySelectedBudId() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'selectedBudId', Sort.asc);
-    });
-  }
-
-  QueryBuilder<AppSettings, AppSettings, QAfterSortBy>
-      sortBySelectedBudIdDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'selectedBudId', Sort.desc);
-    });
-  }
-
   QueryBuilder<AppSettings, AppSettings, QAfterSortBy> sortBySelectedModel() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'selectedModel', Sort.asc);
@@ -675,19 +579,6 @@ extension AppSettingsQuerySortThenBy
     });
   }
 
-  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> thenBySelectedBudId() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'selectedBudId', Sort.asc);
-    });
-  }
-
-  QueryBuilder<AppSettings, AppSettings, QAfterSortBy>
-      thenBySelectedBudIdDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'selectedBudId', Sort.desc);
-    });
-  }
-
   QueryBuilder<AppSettings, AppSettings, QAfterSortBy> thenBySelectedModel() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'selectedModel', Sort.asc);
@@ -716,12 +607,6 @@ extension AppSettingsQuerySortThenBy
 
 extension AppSettingsQueryWhereDistinct
     on QueryBuilder<AppSettings, AppSettings, QDistinct> {
-  QueryBuilder<AppSettings, AppSettings, QDistinct> distinctBySelectedBudId() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addDistinctBy(r'selectedBudId');
-    });
-  }
-
   QueryBuilder<AppSettings, AppSettings, QDistinct> distinctBySelectedModel(
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
@@ -743,12 +628,6 @@ extension AppSettingsQueryProperty
   QueryBuilder<AppSettings, int, QQueryOperations> idProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'id');
-    });
-  }
-
-  QueryBuilder<AppSettings, int?, QQueryOperations> selectedBudIdProperty() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addPropertyName(r'selectedBudId');
     });
   }
 

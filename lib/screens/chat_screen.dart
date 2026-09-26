@@ -3,7 +3,8 @@ import 'package:chatbud/models/bud.dart';
 import 'package:chatbud/models/conversation.dart';
 import 'package:chatbud/models/message.dart';
 import 'package:chatbud/repositories/bud_repository.dart';
-import 'package:chatbud/repositories/chat_repository.dart';
+import 'package:chatbud/repositories/conversation_repository.dart';
+import 'package:chatbud/repositories/message_repository.dart';
 import 'package:chatbud/services/llm_service.dart';
 import 'package:chatbud/widgets/bud_selector.dart';
 import 'package:chatbud/widgets/chat_input.dart';
@@ -25,8 +26,10 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  late ChatRepository _chatRepository;
+  late ConversationRepository _conversationRepository;
+  late MessageRepository _messageRepository;
   late BudRepository _budRepository;
+
   Conversation? _currentConversation;
   Bud? _activeBud; // null = No Bud / Raw LLM
   List<Message> _messages = [];
@@ -52,8 +55,9 @@ class _ChatScreenState extends State<ChatScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_isLoading) {
-      _chatRepository = Provider.of<ChatRepository>(context, listen: false);
-      _budRepository = Provider.of<BudRepository>(context, listen: false);
+      _conversationRepository = context.read<ConversationRepository>();
+      _messageRepository = context.read<MessageRepository>();
+      _budRepository = context.read<BudRepository>();
       _loadActiveConversationAndMessages();
     }
   }
@@ -62,7 +66,7 @@ class _ChatScreenState extends State<ChatScreen> {
     Bud? loadedBud;
     if (widget.conversation != null) {
       final savedMessages =
-          await _chatRepository.getMessagesForConversation(widget.conversation!.id);
+          await _messageRepository.getMessagesForConversation(widget.conversation!.id);
 
       for (int i = 0; i < savedMessages.length; i++) {
         final msg = savedMessages[i];
@@ -77,7 +81,7 @@ class _ChatScreenState extends State<ChatScreen> {
             budId: msg.budId,
           );
           savedMessages[i] = recovered;
-          await _chatRepository.saveMessageAndTouchConversation(recovered);
+          await _messageRepository.saveMessageAndTouchConversation(recovered);
         }
       }
 
@@ -117,7 +121,7 @@ class _ChatScreenState extends State<ChatScreen> {
               updatedAt: DateTime.now(),
             );
       _currentConversation = updatedConv;
-      await _chatRepository.saveConversation(updatedConv);
+      await _conversationRepository.saveConversation(updatedConv);
     }
   }
 
@@ -192,7 +196,7 @@ class _ChatScreenState extends State<ChatScreen> {
         budId: _activeBud?.id,
       );
 
-      final savedMessages = await _chatRepository.saveMessagePairAndTouchConversation(
+      final savedMessages = await _messageRepository.saveMessagePairAndTouchConversation(
         conversation: _currentConversation!,
         userMessage: userMessage,
         assistantMessage: assistantMessage,
@@ -288,7 +292,7 @@ class _ChatScreenState extends State<ChatScreen> {
       );
 
       try {
-        await _chatRepository.saveMessageAndTouchConversation(updatedMsg);
+        await _messageRepository.saveMessageAndTouchConversation(updatedMsg);
       } catch (error, stackTrace) {
         debugPrint("Could not persist completed response: $error\n$stackTrace");
         if (mounted) {

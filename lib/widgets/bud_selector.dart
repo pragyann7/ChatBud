@@ -33,7 +33,7 @@ class BudSelectorChip extends StatelessWidget {
   }
 
   void _showBudSelectionSheet(BuildContext context) {
-    final budRepo = Provider.of<BudRepository>(context, listen: false);
+    final budRepo = context.read<BudRepository>();
     final theme = Theme.of(context);
 
     showModalBottomSheet(
