@@ -1,5 +1,12 @@
+import 'package:flutter/foundation.dart';
+
 class LlmService {
-  Stream<String> generate(String prompt) async* {
+  Stream<String> generate({
+    required String prompt,
+    String? systemPrompt,
+  }) async* {
+    debugPrint("LLM Generation with System Prompt: $systemPrompt");
+
     final hello = ["Hello ", "how ", "can ", "i ", "help ", "you."];
     final whatIsFlutter = [
       "Flutter ",
@@ -68,7 +75,20 @@ class LlmService {
         responseTokens = longResponse;
         break;
       default:
-        responseTokens = ["I'm ", "sorry, ", "I ", "didn't ", "understand ", "that."];
+        // Tailor response slightly based on system prompt for demonstration
+        if (systemPrompt != null && systemPrompt.contains("programming")) {
+          responseTokens = [
+            "As ", "a ", "coding ", "assistant: ", "Here ", "is ", "how ", "you ",
+            "can ", "implement ", "that: ", "```dart\nvoid main() {\n  print('$prompt');\n}\n```"
+          ];
+        } else if (systemPrompt != null && systemPrompt.contains("tutor")) {
+          responseTokens = [
+            "Let ", "me ", "explain ", "this ", "step-by-step ", "like ", "a ",
+            "tutor: ", "Think ", "of ", prompt, " as ", "a ", "building ", "block!"
+          ];
+        } else {
+          responseTokens = ["I'm ", "here ", "to ", "help ", "you ", "with: ", prompt];
+        }
         break;
     }
 

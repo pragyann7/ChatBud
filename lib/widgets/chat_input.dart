@@ -19,7 +19,7 @@ class ChatInput extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.only(left: 8, right: 8, top: 8, bottom: 26),
         child: Row(
           children: [
             IconButton(
