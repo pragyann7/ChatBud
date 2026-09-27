@@ -2,7 +2,7 @@
 
 ChatBud is a Flutter project to build a private, fully offline AI chat app for mobile. The long-term goal is to let a user chat with a language model that runs on their device, without needing an internet connection or sending conversation data to a cloud service.
 
-The app is being developed in learning phases. The current build includes on-device persistence and dynamic AI persona ("Bud") management powered by Isar Database, with simulated response streaming ahead of network/offline LLM engine integration.
+The app is being developed in learning phases. The current build includes on-device persistence and dynamic AI persona ("Bud") management powered by Isar Database, connected to a real local network Ollama AI server for streaming response generation.
 
 ## Project vision
 
@@ -15,7 +15,7 @@ The finished app is intended to provide:
 - A Flutter interface backed by native `llama.cpp` inference through Dart FFI
 - Background generation and memory safeguards for mobile devices
 
-The network API phase below is a temporary learning step for understanding streaming from a remote service. It is not a requirement for the finished offline app.
+The network API phase below is a temporary learning step for understanding streaming from a remote/local network service. It is an educational bridge before moving to pure offline C++ FFI inference.
 
 ## Project status
 
@@ -30,6 +30,12 @@ The network API phase below is a temporary learning step for understanding strea
   - **4 Domain Repositories:** Clean architecture splitting data access into `ConversationRepository`, `MessageRepository`, `BudRepository`, and `SettingsRepository` provided via `MultiProvider`.
   - **Indexing & Paginated Loading:** Database `@Index()` on `conversationId` and `createdAt` with deterministic paginated history queries.
   - **Reliability & Race Conditions:** Parent-conversation checks inside `writeTxn` transactions to prevent orphan messages if chats are deleted mid-generation, with 100% test suite pass rate (`flutter test`).
+- **Phase 3 — Network-based AI streaming & Ollama integration:** Live network streaming from an Ollama AI server (`POST /api/generate`).
+  - **Clean Service Contract (`AiService`)**: Abstract contract implemented by `MacAiService`, supporting prompt and Bud `systemPrompt` parameters for real-time persona completions.
+  - **NDJSON Stream Transformer**: Transformed byte streams using `utf8.decoder` + `LineSplitter()` for 100% multibyte UTF-8 safety (emojis, non-English text) and line-by-line JSON parsing without string allocation churn.
+  - **Dual Timeout Protection**: Implemented 15s connection timeout (for Ollama model cold loads & context prefill) and 15s in-flight idle token timeout.
+  - **User-Initiated Cancellation**: Added Stop Generation button in `ChatInput` that severs the HTTP socket (`_client.close()`), preserves all partial tokens generated up to that moment, and saves them as completed.
+  - **In-Place Message Retry**: Failed/interrupted responses render an inline `⚠️ Generation failed` status with an in-place `[ Retry ]` button that re-streams directly into that message bubble without polluting the chat log or popping global SnackBars.
 
 ### In progress
 
@@ -37,23 +43,19 @@ The network API phase below is a temporary learning step for understanding strea
 
 ### Planned
 
-- **Phase 3 — Network-based streaming (learning bridge):** Use an external REST API or WebSocket to practice handling a real asynchronous token stream. This is an educational bridge and is not part of the final offline runtime.
 - **Phase 4 — Dart FFI and `llama.cpp`:** Connect Dart to native C++ inference using `llama_cpp_dart` or a focused FFI wrapper, and build the required Android and iOS native libraries.
 - **Phase 5 — Isolates and memory safeguards:** Move model loading and inference work off the UI isolate, manage large GGUF models carefully, and handle device memory limits and out-of-memory risks.
 
 ## Current implementation
 
-The app persists conversations, messages, custom Bud profiles, and global settings locally on-device using Isar NoSQL Database. It currently uses a simulated token service to model streamed responses before connecting to a remote/offline LLM runtime.
+The app persists conversations, messages, custom Bud profiles, and global settings locally on-device using Isar NoSQL Database. It connects over the local network to an Ollama server (e.g. `http://<local-ip>:11434`), streaming live token-by-token completions with dynamic Bud system prompts, Isar database persistence, in-place retry, and stop generation controls.
 
-Try these prompts in the current build:
+Try these features in the current build:
 
-- `hello` or `hi`
-- `what is flutter`
-- `how are you`
-- `who are you`
-- `long`, `test`, or `tell me a long story`
-
-Try selecting different AI personas (**Coding Bud**, **Study Bud**, **Creative Bud**, or **No Bud / Raw LLM**) using the top selector chip or drawer!
+- Send any prompt to stream live responses from your local Ollama model (e.g. `llama3.2:1b` or `qwen2.5-coder:3b`).
+- Select different AI personas (**Coding Bud**, **Study Bud**, **Creative Bud**, or **No Bud / Raw LLM**) using the top selector chip or drawer!
+- Tap the **Stop Button** while generating to cleanly halt the response and save partial text to disk.
+- Tap **[ Retry ]** on any failed message to re-trigger generation in-place.
 
 ## Project structure
 
@@ -75,11 +77,12 @@ lib/
 │   ├── buds_screen.dart        # Custom Bud management UI
 │   └── chat_screen.dart        # Main chat UI with paginated history & stream handling
 ├── services/
-│   └── llm_service.dart        # Simulated response stream engine
+│   ├── ai_service.dart         # AiService contract & MacAiService Ollama stream engine
+│   └── llm_service.dart        # Local mock stream fallback engine
 ├── widgets/
 │   ├── bud_selector.dart       # Header chip for turn-by-turn persona switching
-│   ├── chat_input.dart         # Chat input box and controls
-│   └── message_bubble.dart     # Reactive message bubble with ValueNotifier stream
+│   ├── chat_input.dart         # Chat input box, concurrent typing & stop control
+│   └── message_bubble.dart     # Reactive message bubble with in-place Retry & status
 └── main.dart                   # App shell, Provider DI, drawer & error fallbacks
 
 test/
