@@ -6,16 +6,20 @@ class ChatInput extends StatelessWidget {
     required this.controller,
     required this.isGenerating,
     required this.onSend,
+    this.onStop,
     this.onAddAttachment,
   });
 
   final TextEditingController controller;
   final bool isGenerating;
   final VoidCallback onSend;
+  final VoidCallback? onStop;
   final VoidCallback? onAddAttachment;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return SafeArea(
       top: false,
       child: Padding(
@@ -29,11 +33,15 @@ class ChatInput extends StatelessWidget {
             Expanded(
               child: TextField(
                 controller: controller,
-                enabled: !isGenerating,
+                enabled: true, // Allow user to type next message while generating
                 textInputAction: TextInputAction.send,
-                onSubmitted: (_) => onSend(),
+                onSubmitted: (_) {
+                  if (!isGenerating) {
+                    onSend();
+                  }
+                },
                 decoration: InputDecoration(
-                  hintText: isGenerating ? "Generating…" : "Type a message…",
+                  hintText: "Type a message…",
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
                   ),
@@ -45,11 +53,26 @@ class ChatInput extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            IconButton(
-              tooltip: "Send message",
-              onPressed: isGenerating ? null : onSend,
-              icon: const Icon(Icons.send),
-            ),
+            if (isGenerating)
+              IconButton(
+                tooltip: "Stop generation",
+                onPressed: onStop,
+                icon: CircleAvatar(
+                  radius: 16,
+                  backgroundColor: theme.colorScheme.primary,
+                  child: Icon(
+                    Icons.stop_rounded,
+                    size: 18,
+                    color: theme.colorScheme.onPrimary,
+                  ),
+                ),
+              )
+            else
+              IconButton(
+                tooltip: "Send message",
+                onPressed: onSend,
+                icon: const Icon(Icons.send_rounded),
+              ),
           ],
         ),
       ),

@@ -5,7 +5,7 @@ import 'package:chatbud/models/message.dart';
 import 'package:chatbud/repositories/bud_repository.dart';
 import 'package:chatbud/repositories/conversation_repository.dart';
 import 'package:chatbud/repositories/message_repository.dart';
-import 'package:chatbud/services/llm_service.dart';
+import 'package:chatbud/services/ai_service.dart';
 import 'package:chatbud/widgets/bud_selector.dart';
 import 'package:chatbud/widgets/chat_input.dart';
 import 'package:chatbud/widgets/message_bubble.dart';
@@ -40,7 +40,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final Set<int> _activeMessageIds = {};
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final LlmService _llmService = LlmService();
+  final MacAiService _macAiService = MacAiService();
   bool _showScrollToLatest = false;
 
   bool get _isGenerating => _activeMessageIds.isNotEmpty || _isSubmitting;
@@ -148,6 +148,10 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  void _stopGeneration() {
+    _macAiService.stopGeneration();
+  }
+
   void _handleScroll() {
     if (!_scrollController.hasClients) return;
     final shouldShow = _scrollController.position.pixels > 40;
@@ -167,6 +171,89 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     });
+  }
+
+  Future<void> _retryMessage(Message failedAssistantMessage) async {
+    if (_isGenerating) return;
+
+    final index = _messages.indexWhere((m) => m.id == failedAssistantMessage.id);
+    if (index == -1) return;
+
+    // Find user message preceding this assistant message
+    String prompt = "";
+    if (index > 0 && _messages[index - 1].isUser) {
+      prompt = _messages[index - 1].text;
+    } else {
+      final userMsg = _messages.lastWhere((m) => m.isUser, orElse: () => Message(
+        conversationId: failedAssistantMessage.conversationId,
+        text: "",
+        role: MessageRole.user,
+        createdAt: DateTime.now(),
+      ));
+      prompt = userMsg.text;
+    }
+
+    if (prompt.isEmpty) return;
+
+    final assistantId = failedAssistantMessage.id;
+    final notifier = ValueNotifier<String>("");
+
+    if (mounted) {
+      setState(() {
+        _activeMessageIds.add(assistantId);
+        _streamingNotifiers[assistantId] = notifier;
+        // In-place state transition: failed -> pending (generating)
+        _messages[index] = Message(
+          id: failedAssistantMessage.id,
+          conversationId: failedAssistantMessage.conversationId,
+          text: "",
+          role: failedAssistantMessage.role,
+          status: MessageStatus.pending,
+          createdAt: failedAssistantMessage.createdAt,
+          budId: failedAssistantMessage.budId,
+        );
+      });
+    }
+
+    final response = StringBuffer();
+    var lastPublished = DateTime.fromMillisecondsSinceEpoch(0);
+    MessageStatus finalStatus;
+    String finalText;
+
+    try {
+      await for (final token in _macAiService.generateResponse(
+        prompt: prompt,
+        systemPrompt: _activeBud?.systemPrompt,
+      )) {
+        if (!mounted || !_activeMessageIds.contains(assistantId)) {
+          return;
+        }
+        response.write(token);
+        final currentTime = DateTime.now();
+        if (currentTime.difference(lastPublished).inMilliseconds >= 16) {
+          notifier.value = response.toString();
+          lastPublished = currentTime;
+        }
+      }
+      if (!mounted || !_activeMessageIds.contains(assistantId)) return;
+      notifier.value = response.toString();
+      finalStatus = MessageStatus.completed;
+      finalText = response.toString();
+    } on AiServiceException catch (e) {
+      debugPrint('AI Service Error during retry: ${e.message}');
+      if (!mounted || !_activeMessageIds.contains(assistantId)) return;
+      finalStatus = _macAiService.isCancelled ? MessageStatus.completed : MessageStatus.failed;
+      finalText = response.toString();
+    } catch (error, stackTrace) {
+      debugPrint("Retry generation failed: $error\n$stackTrace");
+      if (!mounted || !_activeMessageIds.contains(assistantId)) return;
+      finalStatus = _macAiService.isCancelled ? MessageStatus.completed : MessageStatus.failed;
+      finalText = response.toString();
+    }
+
+    if (!mounted || !_activeMessageIds.contains(assistantId)) return;
+    notifier.value = finalText;
+    await _completeMessage(assistantId, finalText, finalStatus, notifier);
   }
 
   Future<void> _sendMessage() async {
@@ -226,7 +313,6 @@ class _ChatScreenState extends State<ChatScreen> {
       );
 
       if (savedMessages == null || savedMessages.length < 2) {
-        // Parent conversation deleted or save failed
         return;
       }
 
@@ -255,12 +341,11 @@ class _ChatScreenState extends State<ChatScreen> {
       String finalText;
 
       try {
-        await for (final token in _llmService.generate(
+        await for (final token in _macAiService.generateResponse(
           prompt: prompt,
           systemPrompt: _activeBud?.systemPrompt,
         )) {
           if (!mounted || !_activeMessageIds.contains(assistantId)) {
-            // Generation cancelled or conversation deleted
             return;
           }
           response.write(token);
@@ -272,15 +357,18 @@ class _ChatScreenState extends State<ChatScreen> {
         }
         if (!mounted || !_activeMessageIds.contains(assistantId)) return;
         notifier.value = response.toString();
-        finalStatus = MessageStatus.completed;
+        finalStatus = _macAiService.isCancelled ? MessageStatus.completed : MessageStatus.completed;
+        finalText = response.toString();
+      } on AiServiceException catch (e) {
+        debugPrint('AI Service Error: ${e.message}');
+        if (!mounted || !_activeMessageIds.contains(assistantId)) return;
+        finalStatus = _macAiService.isCancelled ? MessageStatus.completed : MessageStatus.failed;
         finalText = response.toString();
       } catch (error, stackTrace) {
         debugPrint("Chat response stream failed: $error\n$stackTrace");
         if (!mounted || !_activeMessageIds.contains(assistantId)) return;
-        finalStatus = MessageStatus.failed;
-        finalText = response.isEmpty
-            ? "Sorry, I couldn’t finish that response. Please try again."
-            : response.toString();
+        finalStatus = _macAiService.isCancelled ? MessageStatus.completed : MessageStatus.failed;
+        finalText = response.toString();
       }
       if (!mounted || !_activeMessageIds.contains(assistantId)) return;
       notifier.value = finalText;
@@ -325,7 +413,6 @@ class _ChatScreenState extends State<ChatScreen> {
       try {
         final savedId = await _messageRepository.saveMessageAndTouchConversation(updatedMsg);
         if (savedId == null) {
-          // Parent conversation was deleted while generating! Cancel/discard.
           if (mounted) {
             setState(() {
               _activeMessageIds.remove(messageId);
@@ -441,10 +528,15 @@ class _ChatScreenState extends State<ChatScreen> {
                   itemCount: _messages.length,
                   itemBuilder: (context, index) {
                     final message = _messages[_messages.length - 1 - index];
+                    final isLatestMessage =
+                        _messages.isNotEmpty && _messages.last.id == message.id;
+
                     return MessageBubble(
                       key: ValueKey(message.id),
                       message: message,
                       textListenable: _streamingNotifiers[message.id],
+                      isLatest: isLatestMessage,
+                      onRetry: () => _retryMessage(message),
                     );
                   },
                 ),
@@ -465,6 +557,7 @@ class _ChatScreenState extends State<ChatScreen> {
           controller: _textController,
           isGenerating: _isGenerating,
           onSend: _sendMessage,
+          onStop: _stopGeneration,
           onAddAttachment: () {},
         ),
       ],
