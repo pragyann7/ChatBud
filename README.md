@@ -35,7 +35,8 @@ The network API phase below is a temporary learning step for understanding strea
   - **NDJSON Stream Transformer**: Transformed byte streams using `utf8.decoder` + `LineSplitter()` for 100% multibyte UTF-8 safety (emojis, non-English text) and line-by-line JSON parsing without string allocation churn.
   - **Dual Timeout Protection**: Implemented 15s connection timeout (for Ollama model cold loads & context prefill) and 15s in-flight idle token timeout.
   - **User-Initiated Cancellation**: Added Stop Generation button in `ChatInput` that severs the HTTP socket (`_client.close()`), preserves all partial tokens generated up to that moment, and saves them as completed.
-  - **In-Place Message Retry**: Failed/interrupted responses render an inline `⚠️ Generation failed` status with an in-place `[ Retry ]` button that re-streams directly into that message bubble without polluting the chat log or popping global SnackBars.
+  - **In-Place Message Retry & Error UX**: Failed/interrupted responses render an inline `⚠️ Generation failed` status with an in-place `[ 🔄 Retry ]` button that re-streams directly into that message bubble without polluting the chat log or popping global SnackBars.
+  - **Dynamic Server IP Settings**: Configurable local server IP address stored in `AppSettings` (`SettingsRepository`) and editable via drawer dialog (`AI Server Settings`).
 
 ### In progress
 
@@ -54,8 +55,10 @@ Try these features in the current build:
 
 - Send any prompt to stream live responses from your local Ollama model (e.g. `llama3.2:1b` or `qwen2.5-coder:3b`).
 - Select different AI personas (**Coding Bud**, **Study Bud**, **Creative Bud**, or **No Bud / Raw LLM**) using the top selector chip or drawer!
-- Tap the **Stop Button** while generating to cleanly halt the response and save partial text to disk.
+- Type your next message freely while generation is in progress.
+- Tap the **Stop Button** while generating to cleanly halt response generation and save partial text to disk.
 - Tap **[ Retry ]** on any failed message to re-trigger generation in-place.
+- Open the drawer and tap the **Settings** icon to update your local Ollama server IP dynamically.
 
 ## Project structure
 
@@ -64,7 +67,7 @@ lib/
 ├── database/
 │   └── database.dart           # Isar DB initialization & default seeding
 ├── models/
-│   ├── app_settings.dart       # Global settings model (Theme, Model selection)
+│   ├── app_settings.dart       # Global settings model (Theme, Model selection, Server IP)
 │   ├── bud.dart                # AI Persona model
 │   ├── conversation.dart       # Chat session model
 │   └── message.dart            # Indexed message model
@@ -72,10 +75,10 @@ lib/
 │   ├── bud_repository.dart          # Persona CRUD & stable ID seeding
 │   ├── conversation_repository.dart # Chat session CRUD & Isar streams
 │   ├── message_repository.dart      # Pair-saving, pagination & touch timestamps
-│   └── settings_repository.dart     # Atomic app settings (Fixed ID = 1)
+│   └── settings_repository.dart     # Atomic app settings (Fixed ID = 1, Server IP)
 ├── screens/
 │   ├── buds_screen.dart        # Custom Bud management UI
-│   └── chat_screen.dart        # Main chat UI with paginated history & stream handling
+│   └── chat_screen.dart        # Main chat UI with paginated history, in-place retry & stream handling
 ├── services/
 │   ├── ai_service.dart         # AiService contract & MacAiService Ollama stream engine
 │   └── llm_service.dart        # Local mock stream fallback engine
@@ -83,7 +86,7 @@ lib/
 │   ├── bud_selector.dart       # Header chip for turn-by-turn persona switching
 │   ├── chat_input.dart         # Chat input box, concurrent typing & stop control
 │   └── message_bubble.dart     # Reactive message bubble with in-place Retry & status
-└── main.dart                   # App shell, Provider DI, drawer & error fallbacks
+└── main.dart                   # App shell, Provider DI, drawer, server IP dialog & error fallbacks
 
 test/
 ├── repository_test.dart        # Unit tests for Isar repositories & race condition safeguards
