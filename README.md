@@ -2,7 +2,7 @@
 
 ChatBud is a Flutter project to build a private, fully offline AI chat app for mobile. The long-term goal is to let a user chat with a language model that runs on their device, without needing an internet connection or sending conversation data to a cloud service.
 
-The app is being developed in learning phases. The current build includes on-device Isar NoSQL persistence, dynamic AI persona ("Bud") management, and real-time streaming integration with a local network Ollama AI server.
+The app is being developed in learning phases. The current build includes on-device persistence and dynamic AI persona ("Bud") management powered by Isar Database, connected to a real local network Ollama AI server for streaming response generation.
 
 ## Project vision
 
@@ -30,7 +30,7 @@ The network API phase below is a temporary learning step for understanding strea
   - **4 Domain Repositories:** Clean architecture splitting data access into `ConversationRepository`, `MessageRepository`, `BudRepository`, and `SettingsRepository` provided via `MultiProvider`.
   - **Indexing & Paginated Loading:** Database `@Index()` on `conversationId` and `createdAt` with deterministic paginated history queries.
   - **Reliability & Race Conditions:** Parent-conversation checks inside `writeTxn` transactions to prevent orphan messages if chats are deleted mid-generation, with 100% test suite pass rate (`flutter test`).
-- **Phase 3 — Network-based AI streaming & Ollama integration:** Live network streaming from a local/LAN Ollama AI server (`POST /api/generate`).
+- **Phase 3 — Network-based AI streaming & Ollama integration:** Live network streaming from an Ollama AI server (`POST /api/generate`).
   - **Clean Service Contract (`AiService`)**: Abstract contract implemented by `MacAiService`, supporting prompt and Bud `systemPrompt` parameters for real-time persona completions.
   - **NDJSON Stream Transformer**: Transformed byte streams using `utf8.decoder` + `LineSplitter()` for 100% multibyte UTF-8 safety (emojis, non-English text) and line-by-line JSON parsing without string allocation churn.
   - **Dual Timeout Protection**: Implemented 15s connection timeout (for Ollama model cold loads & context prefill) and 15s in-flight idle token timeout.
