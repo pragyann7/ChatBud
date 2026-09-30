@@ -14,16 +14,26 @@ abstract class AiService {
 
 class MacAiService implements AiService {
   http.Client? _client;
-  final String baseUrl;
+  final String serverIp;
+  final String port;
   final String modelName;
   bool _isCancelled = false;
 
   bool get isCancelled => _isCancelled;
 
   MacAiService({
-    this.baseUrl = 'http://10.177.114.245:11434',
+    this.serverIp = '192.168.1.74',
+    this.port = '11434',
     this.modelName = 'llama3.2:1b',
   });
+
+  String get baseUrl {
+    final ip = serverIp.trim();
+    if (ip.startsWith('http://') || ip.startsWith('https://')) {
+      return ip;
+    }
+    return 'http://$ip:$port';
+  }
 
   @override
   Stream<String> generateResponse({
@@ -83,11 +93,11 @@ class MacAiService implements AiService {
       }
     } on SocketException {
       if (!_isCancelled) {
-        throw AiServiceException('Could not connect to Ollama.');
+        throw AiServiceException('Could not connect to Ollama at $baseUrl.');
       }
     } on http.ClientException {
       if (!_isCancelled) {
-        throw AiServiceException('Could not connect to Ollama.');
+        throw AiServiceException('Could not connect to Ollama at $baseUrl.');
       }
     } on TimeoutException {
       if (!_isCancelled) {

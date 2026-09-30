@@ -15,6 +15,7 @@ class SettingsRepository {
     final defaultSettings = AppSettings(
       id: _settingsId,
       theme: 'system',
+      serverIp: '192.168.1.74',
     );
     await saveSettings(defaultSettings);
     return defaultSettings;
@@ -25,6 +26,7 @@ class SettingsRepository {
       id: _settingsId, // Enforce fixed ID 1
       theme: settings.theme,
       selectedModel: settings.selectedModel,
+      serverIp: settings.serverIp,
     );
     await isar.writeTxn(() async {
       await isar.appSettings.put(settingsToSave);
@@ -48,5 +50,10 @@ class SettingsRepository {
         clearSelectedModel: newModel == null,
       ),
     );
+  }
+
+  Future<void> updateServerIp(String ip) async {
+    final current = await getSettings();
+    await saveSettings(current.copyWith(serverIp: ip.trim()));
   }
 }
