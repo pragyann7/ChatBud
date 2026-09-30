@@ -210,6 +210,71 @@ class AppDrawer extends StatelessWidget {
     required this.onDeleteConversation,
   });
 
+  void _showServerSettingsDialog(BuildContext context) async {
+    final settingsRepo = context.read<SettingsRepository>();
+    final currentSettings = await settingsRepo.getSettings();
+    final controller = TextEditingController(
+      text: currentSettings.serverIp ?? '192.168.1.74',
+    );
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text("AI Server Settings"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Enter your local Ollama server IP address:",
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType: TextInputType.text,
+                decoration: const InputDecoration(
+                  labelText: "Server IP / Host",
+                  hintText: "e.g., 192.168.1.74 or 10.177.114.245",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final newIp = controller.text.trim();
+                if (newIp.isNotEmpty) {
+                  await settingsRepo.updateServerIp(newIp);
+                  if (ctx.mounted) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      SnackBar(
+                        content: Text("Server IP updated to: $newIp"),
+                      ),
+                    );
+                  }
+                }
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                }
+              },
+              child: const Text("Save"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void _showConversationOptions(BuildContext context, Conversation conv) {
     final conversationRepo = context.read<ConversationRepository>();
     final theme = Theme.of(context);
@@ -599,6 +664,15 @@ class AppDrawer extends StatelessWidget {
                         ),
                       ),
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: "Server Settings",
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _showServerSettingsDialog(context);
+                    },
+                    icon: const Icon(Icons.settings_outlined),
                   ),
                 ],
               ),
