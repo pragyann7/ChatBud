@@ -24,7 +24,9 @@ class MacAiService implements AiService {
   MacAiService({
     this.serverIp = '192.168.1.74',
     this.port = '11434',
-    this.modelName = 'llama3.2:1b',
+    // this.modelName = 'llama3.1:8b-instruct-q3_K_M',
+    this.modelName = 'qwen3:0.6b',
+    // this.modelName = 'llama3.2:1b',
   });
 
   String get baseUrl {
@@ -49,6 +51,7 @@ class MacAiService implements AiService {
       final bodyMap = <String, dynamic>{
         'model': modelName,
         'prompt': prompt,
+        'think': true,
         'stream': true,
       };
 
@@ -62,7 +65,7 @@ class MacAiService implements AiService {
 
       final response = await _client!
           .send(request)
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 35));
 
       if (response.statusCode != 200) {
         final body = await response.stream.bytesToString();
@@ -77,17 +80,49 @@ class MacAiService implements AiService {
           .transform(const LineSplitter())
           .timeout(const Duration(seconds: 15));
 
+      bool inThinkingState = false;
+
       await for (final line in lines) {
         if (line.trim().isEmpty) continue;
 
         final data = jsonDecode(line) as Map<String, dynamic>;
 
         if (data['done'] == true) {
+          if (inThinkingState) {
+            yield '\n</think>\n';
+          }
           break;
         }
 
-        final token = data['response'] as String?;
-        if (token != null) {
+        // 1. Check if Ollama provides a dedicated 'thinking' or 'reasoning_content' JSON field
+        final thinkingChunk = data['thinking'] as String? ??
+            data['reasoning_content'] as String? ??
+            (data['message'] is Map
+                ? data['message']['thinking'] as String?
+                : null);
+
+        if (thinkingChunk != null && thinkingChunk.isNotEmpty) {
+          if (!inThinkingState) {
+            inThinkingState = true;
+            yield '<think>\n';
+          }
+          yield thinkingChunk;
+          continue;
+        }
+
+        // If thinking field ended, close the <think> tag
+        if (inThinkingState) {
+          inThinkingState = false;
+          yield '\n</think>\n';
+        }
+
+        // 2. Standard response text field (may contain raw <think> tags from models like deepseek-r1)
+        final token = data['response'] as String? ??
+            (data['message'] is Map
+                ? data['message']['content'] as String?
+                : null);
+
+        if (token != null && token.isNotEmpty) {
           yield token;
         }
       }
