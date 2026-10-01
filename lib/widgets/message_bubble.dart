@@ -2,6 +2,144 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:chatbud/models/message.dart';
 
+class ParsedMessage {
+  final String? thinkingText;
+  final String answerText;
+  final bool isStillThinking;
+
+  ParsedMessage({
+    this.thinkingText,
+    required this.answerText,
+    required this.isStillThinking,
+  });
+
+  static ParsedMessage parse(String rawText) {
+    if (!rawText.contains('<think>')) {
+      return ParsedMessage(
+        answerText: rawText,
+        isStillThinking: false,
+      );
+    }
+
+    final thinkStartIndex = rawText.indexOf('<think>') + 7;
+    if (!rawText.contains('</think>')) {
+      // Stream is currently inside <think>...</think>
+      final thinking = rawText.substring(thinkStartIndex).trim();
+      return ParsedMessage(
+        thinkingText: thinking,
+        answerText: '',
+        isStillThinking: true,
+      );
+    }
+
+    // Stream has passed </think>
+    final thinkEndIndex = rawText.indexOf('</think>');
+    final thinking = rawText.substring(thinkStartIndex, thinkEndIndex).trim();
+    final answer = rawText.substring(thinkEndIndex + 8).trim();
+
+    return ParsedMessage(
+      thinkingText: thinking,
+      answerText: answer,
+      isStillThinking: false,
+    );
+  }
+}
+
+class ThinkingAccordion extends StatefulWidget {
+  final String thinkingText;
+  final bool isStillThinking;
+
+  const ThinkingAccordion({
+    super.key,
+    required this.thinkingText,
+    required this.isStillThinking,
+  });
+
+  @override
+  State<ThinkingAccordion> createState() => _ThinkingAccordionState();
+}
+
+class _ThinkingAccordionState extends State<ThinkingAccordion> {
+  bool? _userExpanded;
+
+  bool get _isExpanded => _userExpanded ?? widget.isStillThinking;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHigh.withOpacity(0.6),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withOpacity(0.4),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () {
+              setState(() {
+                _userExpanded = !_isExpanded;
+              });
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.psychology_rounded,
+                    size: 16,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.isStillThinking
+                          ? "Thinking…"
+                          : "Thought Process",
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    _isExpanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 18,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_isExpanded && widget.thinkingText.isNotEmpty) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(
+                widget.thinkingText,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontFamily: 'monospace',
+                  fontStyle: FontStyle.italic,
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class MessageBubble extends StatelessWidget {
   const MessageBubble({
     super.key,
@@ -20,18 +158,7 @@ class MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isFailed = message.status == MessageStatus.failed;
-
-    Widget contentText;
-    if (textListenable == null) {
-      contentText = Text(message.text);
-    } else {
-      contentText = ValueListenableBuilder<String>(
-        valueListenable: textListenable!,
-        builder: (context, value, _) {
-          return Text(value.isEmpty ? message.text : value);
-        },
-      );
-    }
+    final showFailedBadge = isFailed && !message.isUser && isLatest;
 
     return Align(
       alignment: message.isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -44,7 +171,7 @@ class MessageBubble extends StatelessWidget {
               ? theme.colorScheme.primaryContainer
               : theme.colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(16),
-          border: isFailed && !message.isUser
+          border: showFailedBadge
               ? Border.all(
                   color: theme.colorScheme.error.withOpacity(0.5),
                   width: 1,
@@ -55,15 +182,26 @@ class MessageBubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            DefaultTextStyle.merge(
-              style: TextStyle(
-                color: message.isUser
-                    ? theme.colorScheme.onPrimaryContainer
-                    : theme.colorScheme.onSurfaceVariant,
-              ),
-              child: contentText,
-            ),
-            if (isFailed && !message.isUser) ...[
+            if (message.isUser)
+              DefaultTextStyle.merge(
+                style: TextStyle(
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
+                child: Text(message.text),
+              )
+            else ...[
+              // Assistant Message Builder (supports <think>...</think> rendering)
+              textListenable == null
+                  ? _buildParsedAssistantMessage(context, message.text)
+                  : ValueListenableBuilder<String>(
+                      valueListenable: textListenable!,
+                      builder: (context, value, _) {
+                        final raw = value.isNotEmpty ? value : message.text;
+                        return _buildParsedAssistantMessage(context, raw);
+                      },
+                    ),
+            ],
+            if (showFailedBadge) ...[
               const SizedBox(height: 8),
               Row(
                 mainAxisSize: MainAxisSize.min,
@@ -122,6 +260,30 @@ class MessageBubble extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildParsedAssistantMessage(BuildContext context, String rawText) {
+    final theme = Theme.of(context);
+    final parsed = ParsedMessage.parse(rawText);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (parsed.thinkingText != null && parsed.thinkingText!.isNotEmpty)
+          ThinkingAccordion(
+            thinkingText: parsed.thinkingText!,
+            isStillThinking: parsed.isStillThinking,
+          ),
+        if (parsed.answerText.isNotEmpty)
+          DefaultTextStyle.merge(
+            style: TextStyle(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            child: Text(parsed.answerText),
+          ),
+      ],
     );
   }
 }
