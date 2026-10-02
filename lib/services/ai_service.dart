@@ -51,9 +51,16 @@ class MacAiService implements AiService {
       final bodyMap = <String, dynamic>{
         'model': modelName,
         'prompt': prompt,
-        'think': true,
         'stream': true,
       };
+
+      // Only pass 'think': true for models that explicitly support reasoning
+      final lowerModel = modelName.toLowerCase();
+      if (lowerModel.contains('qwen3') ||
+          lowerModel.contains('deepseek') ||
+          lowerModel.contains('qwq')) {
+        bodyMap['think'] = true;
+      }
 
       if (systemPrompt != null && systemPrompt.isNotEmpty) {
         bodyMap['system'] = systemPrompt;
