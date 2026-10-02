@@ -2,7 +2,7 @@
 
 ChatBud is a Flutter project to build a private, fully offline AI chat app for mobile. The long-term goal is to let a user chat with a language model that runs on their device, without needing an internet connection or sending conversation data to a cloud service.
 
-The app is being developed in learning phases. The current build includes on-device persistence and dynamic AI persona ("Bud") management powered by Isar Database, connected to a real local network Ollama AI server for streaming response generation.
+The app is being developed in learning phases. The current build includes on-device Isar NoSQL persistence, dynamic AI persona ("Bud") management, and real-time multi-turn streaming integration with a local network Ollama AI server.
 
 ## Project vision
 
@@ -30,13 +30,17 @@ The network API phase below is a temporary learning step for understanding strea
   - **4 Domain Repositories:** Clean architecture splitting data access into `ConversationRepository`, `MessageRepository`, `BudRepository`, and `SettingsRepository` provided via `MultiProvider`.
   - **Indexing & Paginated Loading:** Database `@Index()` on `conversationId` and `createdAt` with deterministic paginated history queries.
   - **Reliability & Race Conditions:** Parent-conversation checks inside `writeTxn` transactions to prevent orphan messages if chats are deleted mid-generation, with 100% test suite pass rate (`flutter test`).
-- **Phase 3 — Network-based AI streaming & Ollama integration:** Live network streaming from an Ollama AI server (`POST /api/generate`).
-  - **Clean Service Contract (`AiService`)**: Abstract contract implemented by `MacAiService`, supporting prompt and Bud `systemPrompt` parameters for real-time persona completions.
-  - **NDJSON Stream Transformer**: Transformed byte streams using `utf8.decoder` + `LineSplitter()` for 100% multibyte UTF-8 safety (emojis, non-English text) and line-by-line JSON parsing without string allocation churn.
-  - **Dual Timeout Protection**: Implemented 15s connection timeout (for Ollama model cold loads & context prefill) and 15s in-flight idle token timeout.
+- **Phase 3 — Network-based AI streaming & Ollama integration:** Live network streaming from an Ollama AI server (`POST /api/chat`).
+  - **Multi-Turn Conversation Context**: Passes past conversation turns directly to Ollama so the model maintains multi-turn context memory.
+  - **Sliding Window Context Limits**: Limits conversation history to the last 10 messages max (~1500 tokens) to prevent prompt bloat and out-of-memory crashes on mobile devices.
+  - **Clean Service Contract (`AiService`)**: Abstract contract implemented by `MacAiService`, supporting `prompt`, `systemPrompt`, and `conversationHistory`.
+  - **Ollama HTTP Stream Engine**: Connects to Ollama (`POST /api/chat`) over local Wi-Fi with conditional `'think': true` handling for reasoning models (`qwen3`, `deepseek-r1`, `qwq`) to prevent HTTP 400 errors on standard models (`llama3.1`, `llama3.2`).
+  - **NDJSON Stream Transformer & Safety**: Uses `utf8.decoder` + `LineSplitter()` with `try-catch` JSON line parsing to guarantee 100% multibyte UTF-8 safety and malformed line protection.
+  - **Dual Network Timeout Protection**: 50s initial connection timeout (allows heavy model cold loads & context prefill) and 15s in-flight idle token timeout.
   - **User-Initiated Cancellation**: Added Stop Generation button in `ChatInput` that severs the HTTP socket (`_client.close()`), preserves all partial tokens generated up to that moment, and saves them as completed.
   - **In-Place Message Retry & Error UX**: Failed/interrupted responses render an inline `⚠️ Generation failed` status with an in-place `[ 🔄 Retry ]` button that re-streams directly into that message bubble without polluting the chat log or popping global SnackBars.
-  - **Dynamic Server IP Settings**: Configurable local server IP address stored in `AppSettings` (`SettingsRepository`) and editable via drawer dialog (`AI Server Settings`).
+  - **Collapsible Thinking Accordion**: Parses `<think>...</think>` XML tags and Ollama `thinking` / `reasoning_content` JSON fields. Renders live streaming reasoning inside a collapsible `🧠 Thought Process` card above the main answer.
+  - **Dynamic AI Server IP Settings**: Configurable local server IP address stored in `AppSettings` (`SettingsRepository`) and editable via drawer dialog (`AI Server Settings`).
 
 ### In progress
 
@@ -53,8 +57,9 @@ The app persists conversations, messages, custom Bud profiles, and global settin
 
 Try these features in the current build:
 
-- Send any prompt to stream live responses from your local Ollama model (e.g. `llama3.2:1b` or `qwen2.5-coder:3b`).
+- Send any prompt to stream live responses from your local Ollama model (e.g. `qwen3:0.6b`, `llama3.1:8b`, or `qwen2.5-coder:3b`).
 - Select different AI personas (**Coding Bud**, **Study Bud**, **Creative Bud**, or **No Bud / Raw LLM**) using the top selector chip or drawer!
+- Watch the live **`🧠 Thought Process`** accordion stream reasoning when using reasoning models like `qwen3` or `deepseek-r1`.
 - Type your next message freely while generation is in progress.
 - Tap the **Stop Button** while generating to cleanly halt response generation and save partial text to disk.
 - Tap **[ Retry ]** on any failed message to re-trigger generation in-place.
@@ -85,7 +90,7 @@ lib/
 ├── widgets/
 │   ├── bud_selector.dart       # Header chip for turn-by-turn persona switching
 │   ├── chat_input.dart         # Chat input box, concurrent typing & stop control
-│   └── message_bubble.dart     # Reactive message bubble with in-place Retry & status
+│   └── message_bubble.dart     # Reactive message bubble with ParsedMessage & ThinkingAccordion
 └── main.dart                   # App shell, Provider DI, drawer, server IP dialog & error fallbacks
 
 test/

@@ -4,11 +4,13 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:chatbud/models/message.dart';
 
 abstract class AiService {
   Stream<String> generateResponse({
     required String prompt,
     String? systemPrompt,
+    List<Message>? conversationHistory,
   });
 }
 
@@ -41,22 +43,60 @@ class MacAiService implements AiService {
   Stream<String> generateResponse({
     required String prompt,
     String? systemPrompt,
+    List<Message>? conversationHistory,
   }) async* {
     _isCancelled = false;
     try {
-      final request = http.Request('POST', Uri.parse('$baseUrl/api/generate'));
+      // 9 & 10. Multi-turn conversation context with sliding window limit (last 10 messages)
+      final List<Map<String, String>> chatMessages = [];
 
+      if (systemPrompt != null && systemPrompt.isNotEmpty) {
+        chatMessages.add({
+          'role': 'system',
+          'content': systemPrompt,
+        });
+      }
+
+      if (conversationHistory != null && conversationHistory.isNotEmpty) {
+        // Filter out empty/failed messages
+        final validHistory = conversationHistory
+            .where((m) => m.text.isNotEmpty && m.status != MessageStatus.failed)
+            .toList();
+
+        // Enforce context limit: Take last 10 messages max (~1500 tokens)
+        final boundedHistory = validHistory.length > 10
+            ? validHistory.sublist(validHistory.length - 10)
+            : validHistory;
+
+        for (final msg in boundedHistory) {
+          chatMessages.add({
+            'role': msg.isUser ? 'user' : 'assistant',
+            'content': msg.text,
+          });
+        }
+      } else {
+        chatMessages.add({
+          'role': 'user',
+          'content': prompt,
+        });
+      }
+
+      // Use Ollama's /api/chat endpoint for multi-turn chat history
+      final request = http.Request('POST', Uri.parse('$baseUrl/api/chat'));
       request.headers['Content-Type'] = 'application/json';
 
       final bodyMap = <String, dynamic>{
         'model': modelName,
-        'prompt': prompt,
-        'think': true,
+        'messages': chatMessages,
         'stream': true,
       };
 
-      if (systemPrompt != null && systemPrompt.isNotEmpty) {
-        bodyMap['system'] = systemPrompt;
+      // Conditionally pass 'think': true for reasoning models
+      final lowerModel = modelName.toLowerCase();
+      if (lowerModel.contains('qwen3') ||
+          lowerModel.contains('deepseek') ||
+          lowerModel.contains('qwq')) {
+        bodyMap['think'] = true;
       }
 
       request.body = jsonEncode(bodyMap);
@@ -65,7 +105,7 @@ class MacAiService implements AiService {
 
       final response = await _client!
           .send(request)
-          .timeout(const Duration(seconds: 35));
+          .timeout(const Duration(seconds: 50));
 
       if (response.statusCode != 200) {
         final body = await response.stream.bytesToString();
@@ -85,7 +125,13 @@ class MacAiService implements AiService {
       await for (final line in lines) {
         if (line.trim().isEmpty) continue;
 
-        final data = jsonDecode(line) as Map<String, dynamic>;
+        Map<String, dynamic> data;
+        try {
+          data = jsonDecode(line) as Map<String, dynamic>;
+        } catch (_) {
+          // Handle malformed NDJSON lines safely
+          continue;
+        }
 
         if (data['done'] == true) {
           if (inThinkingState) {
@@ -94,7 +140,7 @@ class MacAiService implements AiService {
           break;
         }
 
-        // 1. Check if Ollama provides a dedicated 'thinking' or 'reasoning_content' JSON field
+        // 1. Dedicated 'thinking' or 'reasoning_content' JSON field
         final thinkingChunk = data['thinking'] as String? ??
             data['reasoning_content'] as String? ??
             (data['message'] is Map
@@ -110,17 +156,17 @@ class MacAiService implements AiService {
           continue;
         }
 
-        // If thinking field ended, close the <think> tag
+        // If thinking ended, close the <think> tag
         if (inThinkingState) {
           inThinkingState = false;
           yield '\n</think>\n';
         }
 
-        // 2. Standard response text field (may contain raw <think> tags from models like deepseek-r1)
-        final token = data['response'] as String? ??
-            (data['message'] is Map
+        // 2. Standard response text field from /api/chat or /api/generate
+        final token = (data['message'] is Map
                 ? data['message']['content'] as String?
-                : null);
+                : null) ??
+            data['response'] as String?;
 
         if (token != null && token.isNotEmpty) {
           yield token;

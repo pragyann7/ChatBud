@@ -69,7 +69,6 @@ class _ChatScreenState extends State<ChatScreen> {
     Bud? loadedBud;
     try {
       if (widget.conversation != null) {
-        // Use indexed paginated query for initial history load
         final savedMessages = await _messageRepository
             .getMessagesForConversationPaginated(widget.conversation!.id, limit: 50, offset: 0);
 
@@ -93,7 +92,6 @@ class _ChatScreenState extends State<ChatScreen> {
         if (widget.conversation!.budId != null) {
           loadedBud = await _budRepository.getBud(widget.conversation!.budId!);
           if (loadedBud == null) {
-            // Referenced Bud was deleted! Auto-repair conversation reference to null
             final repaired = widget.conversation!.copyWith(clearBudId: true);
             await _conversationRepository.saveConversation(repaired);
           }
@@ -116,7 +114,7 @@ class _ChatScreenState extends State<ChatScreen> {
     } finally {
       if (mounted) {
         setState(() {
-          _activeBud = loadedBud; // New chat or deleted Bud -> null (No Bud / Raw LLM)
+          _activeBud = loadedBud;
           _isLoading = false;
         });
       }
@@ -229,6 +227,7 @@ class _ChatScreenState extends State<ChatScreen> {
       await for (final token in aiService.generateResponse(
         prompt: prompt,
         systemPrompt: _activeBud?.systemPrompt,
+        conversationHistory: _messages.sublist(0, index),
       )) {
         if (!mounted || !_activeMessageIds.contains(assistantId)) {
           return;
@@ -353,6 +352,7 @@ class _ChatScreenState extends State<ChatScreen> {
         await for (final token in aiService.generateResponse(
           prompt: prompt,
           systemPrompt: _activeBud?.systemPrompt,
+          conversationHistory: _messages,
         )) {
           if (!mounted || !_activeMessageIds.contains(assistantId)) {
             return;
