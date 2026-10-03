@@ -23,57 +23,89 @@ class ChatInput extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.only(left: 8, right: 8, top: 8, bottom: 26),
-        child: Row(
-          children: [
-            IconButton(
-              onPressed: isGenerating ? null : onAddAttachment,
-              icon: const Icon(Icons.add),
+        padding: const EdgeInsets.only(left: 12, right: 12, top: 6, bottom: 14),
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.7),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withOpacity(0.5),
             ),
-            Expanded(
-              child: TextField(
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
                 controller: controller,
                 enabled: true, // Allow user to type next message while generating
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) {
-                  if (!isGenerating) {
-                    onSend();
-                  }
-                },
-                decoration: InputDecoration(
+                minLines: 1,
+                maxLines: 11, // Expands up to 7 lines then becomes scrollable
+                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
+                style: theme.textTheme.bodyMedium,
+                decoration: const InputDecoration(
                   hintText: "Type a message…",
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.only(
+                    left: 16,
+                    right: 16,
+                    top: 12,
+                    bottom: 4,
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: 4),
-            if (isGenerating)
-              IconButton(
-                tooltip: "Stop generation",
-                onPressed: onStop,
-                icon: CircleAvatar(
-                  radius: 16,
-                  backgroundColor: theme.colorScheme.primary,
-                  child: Icon(
-                    Icons.stop_rounded,
-                    size: 18,
-                    color: theme.colorScheme.onPrimary,
-                  ),
+              Padding(
+                padding: const EdgeInsets.only(
+                  left: 6,
+                  right: 8,
+                  bottom: 6,
+                  top: 2,
                 ),
-              )
-            else
-              IconButton(
-                tooltip: "Send message",
-                onPressed: onSend,
-                icon: const Icon(Icons.send_rounded),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: "Add attachment",
+                      onPressed: isGenerating ? null : onAddAttachment,
+                      icon: Icon(
+                        Icons.add_rounded,
+                        size: 22,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (isGenerating)
+                      IconButton(
+                        tooltip: "Stop generation",
+                        onPressed: onStop,
+                        icon: CircleAvatar(
+                          radius: 15,
+                          backgroundColor: theme.colorScheme.primary,
+                          child: Icon(
+                            Icons.stop_rounded,
+                            size: 16,
+                            color: theme.colorScheme.onPrimary,
+                          ),
+                        ),
+                      )
+                    else
+                      IconButton(
+                        tooltip: "Send message",
+                        onPressed: onSend,
+                        icon: CircleAvatar(
+                          radius: 15,
+                          backgroundColor: theme.colorScheme.primary,
+                          child: Icon(
+                            Icons.arrow_upward_rounded,
+                            size: 18,
+                            color: theme.colorScheme.onPrimary,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:chatbud/main.dart';
 import 'package:chatbud/models/bud.dart';
@@ -7,6 +8,7 @@ import 'package:chatbud/repositories/bud_repository.dart';
 import 'package:chatbud/repositories/conversation_repository.dart';
 import 'package:chatbud/repositories/message_repository.dart';
 import 'package:chatbud/repositories/settings_repository.dart';
+import 'package:chatbud/services/generation_manager.dart';
 import 'package:provider/provider.dart';
 
 class _FakeConversationRepository implements ConversationRepository {
@@ -44,6 +46,20 @@ class _FakeSettingsRepository implements SettingsRepository {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _FakeGenerationManager extends ChangeNotifier implements GenerationManager {
+  @override
+  bool isGenerating(int conversationId) => false;
+
+  @override
+  bool get isAnyGenerating => false;
+
+  @override
+  ValueNotifier<String>? getNotifier(int conversationId, int assistantMessageId) => null;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 void main() {
   testWidgets('App renders correctly', (WidgetTester tester) async {
     await tester.pumpWidget(
@@ -60,6 +76,9 @@ void main() {
           ),
           Provider<SettingsRepository>.value(
             value: _FakeSettingsRepository(),
+          ),
+          ChangeNotifierProvider<GenerationManager>.value(
+            value: _FakeGenerationManager(),
           ),
         ],
         child: const MyApp(),
