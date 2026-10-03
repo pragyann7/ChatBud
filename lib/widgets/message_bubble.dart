@@ -23,7 +23,6 @@ class ParsedMessage {
 
     final thinkStartIndex = rawText.indexOf('<think>') + 7;
     if (!rawText.contains('</think>')) {
-      // Stream is currently inside <think>...</think>
       final thinking = rawText.substring(thinkStartIndex).trim();
       return ParsedMessage(
         thinkingText: thinking,
@@ -32,7 +31,6 @@ class ParsedMessage {
       );
     }
 
-    // Stream has passed </think>
     final thinkEndIndex = rawText.indexOf('</think>');
     final thinking = rawText.substring(thinkStartIndex, thinkEndIndex).trim();
     final answer = rawText.substring(thinkEndIndex + 8).trim();
@@ -157,8 +155,9 @@ class MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isGenerating = textListenable != null;
     final isFailed = message.status == MessageStatus.failed;
-    final showFailedBadge = isFailed && !message.isUser && isLatest;
+    final showFailedBadge = isFailed && !message.isUser && isLatest && !isGenerating;
 
     return Align(
       alignment: message.isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -190,7 +189,6 @@ class MessageBubble extends StatelessWidget {
                 child: Text(message.text),
               )
             else ...[
-              // Assistant Message Builder (supports <think>...</think> rendering)
               textListenable == null
                   ? _buildParsedAssistantMessage(context, message.text)
                   : ValueListenableBuilder<String>(

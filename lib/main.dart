@@ -7,6 +7,7 @@ import 'package:chatbud/repositories/message_repository.dart';
 import 'package:chatbud/repositories/settings_repository.dart';
 import 'package:chatbud/screens/buds_screen.dart';
 import 'package:chatbud/screens/chat_screen.dart';
+import 'package:chatbud/services/generation_manager.dart';
 import 'package:provider/provider.dart';
 
 Future<void> main() async {
@@ -32,6 +33,11 @@ Future<void> main() async {
   final budRepository = BudRepository(database.isar);
   final settingsRepository = SettingsRepository(database.isar);
 
+  final generationManager = GenerationManager(
+    messageRepository: messageRepository,
+    settingsRepository: settingsRepository,
+  );
+
   runApp(
     MultiProvider(
       providers: [
@@ -40,6 +46,7 @@ Future<void> main() async {
         Provider<MessageRepository>.value(value: messageRepository),
         Provider<BudRepository>.value(value: budRepository),
         Provider<SettingsRepository>.value(value: settingsRepository),
+        ChangeNotifierProvider<GenerationManager>.value(value: generationManager),
       ],
       child: const MyApp(),
     ),
@@ -121,6 +128,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _selectConversation(Conversation conversation) {
+    context.read<GenerationManager>().markConversationAsRead(conversation.id);
     setState(() {
       _activeConversation = conversation;
       _screenKey = conversation.id;
@@ -415,6 +423,7 @@ class AppDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final conversationRepo = context.read<ConversationRepository>();
+    final genManager = context.watch<GenerationManager>();
     final theme = Theme.of(context);
 
     return Drawer(
@@ -506,6 +515,32 @@ class AppDrawer extends StatelessWidget {
                           (conv) {
                             final isSelected =
                                 activeConversation?.id == conv.id;
+                            final isGenerating =
+                                genManager.isGenerating(conv.id);
+                            final hasUnread =
+                                genManager.hasUnreadCompletion(conv.id);
+
+                            Widget? trailingWidget;
+                            if (isGenerating) {
+                              trailingWidget = SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              );
+                            } else if (hasUnread && !isSelected) {
+                              trailingWidget = Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.error,
+                                  shape: BoxShape.circle,
+                                ),
+                              );
+                            }
+
                             return ListTile(
                               selected: isSelected,
                               selectedTileColor: theme
@@ -537,7 +572,9 @@ class AppDrawer extends StatelessWidget {
                                       : null,
                                 ),
                               ),
+                              trailing: trailingWidget,
                               onTap: () {
+                                genManager.markConversationAsRead(conv.id);
                                 Navigator.pop(context);
                                 onSelectConversation(conv);
                               },
@@ -589,6 +626,32 @@ class AppDrawer extends StatelessWidget {
                           (conv) {
                             final isSelected =
                                 activeConversation?.id == conv.id;
+                            final isGenerating =
+                                genManager.isGenerating(conv.id);
+                            final hasUnread =
+                                genManager.hasUnreadCompletion(conv.id);
+
+                            Widget? trailingWidget;
+                            if (isGenerating) {
+                              trailingWidget = SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              );
+                            } else if (hasUnread && !isSelected) {
+                              trailingWidget = Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.error,
+                                  shape: BoxShape.circle,
+                                ),
+                              );
+                            }
+
                             return ListTile(
                               selected: isSelected,
                               selectedTileColor: theme
@@ -612,7 +675,9 @@ class AppDrawer extends StatelessWidget {
                                       : null,
                                 ),
                               ),
+                              trailing: trailingWidget,
                               onTap: () {
+                                genManager.markConversationAsRead(conv.id);
                                 Navigator.pop(context);
                                 onSelectConversation(conv);
                               },

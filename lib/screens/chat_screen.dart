@@ -5,8 +5,7 @@ import 'package:chatbud/models/message.dart';
 import 'package:chatbud/repositories/bud_repository.dart';
 import 'package:chatbud/repositories/conversation_repository.dart';
 import 'package:chatbud/repositories/message_repository.dart';
-import 'package:chatbud/repositories/settings_repository.dart';
-import 'package:chatbud/services/ai_service.dart';
+import 'package:chatbud/services/generation_manager.dart';
 import 'package:chatbud/widgets/bud_selector.dart';
 import 'package:chatbud/widgets/chat_input.dart';
 import 'package:chatbud/widgets/message_bubble.dart';
@@ -30,7 +29,6 @@ class _ChatScreenState extends State<ChatScreen> {
   late ConversationRepository _conversationRepository;
   late MessageRepository _messageRepository;
   late BudRepository _budRepository;
-  late SettingsRepository _settingsRepository;
 
   Conversation? _currentConversation;
   Bud? _activeBud; // null = No Bud / Raw LLM
@@ -38,14 +36,9 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isLoading = true;
   bool _isSubmitting = false;
 
-  final Map<int, ValueNotifier<String>> _streamingNotifiers = {};
-  final Set<int> _activeMessageIds = {};
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  MacAiService? _currentAiService;
   bool _showScrollToLatest = false;
-
-  bool get _isGenerating => _activeMessageIds.isNotEmpty || _isSubmitting;
 
   @override
   void initState() {
@@ -60,7 +53,6 @@ class _ChatScreenState extends State<ChatScreen> {
       _conversationRepository = context.read<ConversationRepository>();
       _messageRepository = context.read<MessageRepository>();
       _budRepository = context.read<BudRepository>();
-      _settingsRepository = context.read<SettingsRepository>();
       _loadActiveConversationAndMessages();
     }
   }
@@ -69,12 +61,18 @@ class _ChatScreenState extends State<ChatScreen> {
     Bud? loadedBud;
     try {
       if (widget.conversation != null) {
+        final genManager = context.read<GenerationManager>();
+        genManager.markConversationAsRead(widget.conversation!.id);
+
         final savedMessages = await _messageRepository
             .getMessagesForConversationPaginated(widget.conversation!.id, limit: 50, offset: 0);
 
+        final isJobActive = genManager.isGenerating(widget.conversation!.id);
+
         for (int i = 0; i < savedMessages.length; i++) {
           final msg = savedMessages[i];
-          if (msg.status == MessageStatus.pending) {
+          // Recover abandoned 'pending' messages from killed/crashed app sessions
+          if (msg.status == MessageStatus.pending && !isJobActive) {
             final recovered = Message(
               id: msg.id,
               conversationId: msg.conversationId,
@@ -150,7 +148,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _stopGeneration() {
-    _currentAiService?.stopGeneration();
+    if (_currentConversation != null) {
+      context.read<GenerationManager>().stopGeneration(_currentConversation!.id);
+    }
   }
 
   void _handleScroll() {
@@ -175,7 +175,11 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _retryMessage(Message failedAssistantMessage) async {
-    if (_isGenerating) return;
+    final genManager = context.read<GenerationManager>();
+    if (_currentConversation != null &&
+        genManager.isGenerating(_currentConversation!.id)) {
+      return;
+    }
 
     final index = _messages.indexWhere((m) => m.id == failedAssistantMessage.id);
     if (index == -1) return;
@@ -195,73 +199,43 @@ class _ChatScreenState extends State<ChatScreen> {
 
     if (prompt.isEmpty) return;
 
-    final settings = await _settingsRepository.getSettings();
-    final aiService = MacAiService(serverIp: settings.serverIp ?? '192.168.1.74');
-    _currentAiService = aiService;
-
-    final assistantId = failedAssistantMessage.id;
-    final notifier = ValueNotifier<String>("");
+    final pendingMsg = Message(
+      id: failedAssistantMessage.id,
+      conversationId: failedAssistantMessage.conversationId,
+      text: "",
+      role: failedAssistantMessage.role,
+      status: MessageStatus.pending,
+      createdAt: failedAssistantMessage.createdAt,
+      budId: failedAssistantMessage.budId,
+    );
 
     if (mounted) {
       setState(() {
-        _activeMessageIds.add(assistantId);
-        _streamingNotifiers[assistantId] = notifier;
-        _messages[index] = Message(
-          id: failedAssistantMessage.id,
-          conversationId: failedAssistantMessage.conversationId,
-          text: "",
-          role: failedAssistantMessage.role,
-          status: MessageStatus.pending,
-          createdAt: failedAssistantMessage.createdAt,
-          budId: failedAssistantMessage.budId,
-        );
+        _messages[index] = pendingMsg;
       });
     }
 
-    final response = StringBuffer();
-    var lastPublished = DateTime.fromMillisecondsSinceEpoch(0);
-    MessageStatus finalStatus;
-    String finalText;
+    // Persist pending status to Isar DB so DB matches active generation state
+    await _messageRepository.saveMessageAndTouchConversation(pendingMsg);
 
-    try {
-      await for (final token in aiService.generateResponse(
-        prompt: prompt,
-        systemPrompt: _activeBud?.systemPrompt,
-        conversationHistory: _messages.sublist(0, index),
-      )) {
-        if (!mounted || !_activeMessageIds.contains(assistantId)) {
-          return;
-        }
-        response.write(token);
-        final currentTime = DateTime.now();
-        if (currentTime.difference(lastPublished).inMilliseconds >= 16) {
-          notifier.value = response.toString();
-          lastPublished = currentTime;
-        }
-      }
-      if (!mounted || !_activeMessageIds.contains(assistantId)) return;
-      notifier.value = response.toString();
-      finalStatus = MessageStatus.completed;
-      finalText = response.toString();
-    } on AiServiceException catch (e) {
-      debugPrint('AI Service Error during retry: ${e.message}');
-      if (!mounted || !_activeMessageIds.contains(assistantId)) return;
-      finalStatus = aiService.isCancelled ? MessageStatus.completed : MessageStatus.failed;
-      finalText = response.toString();
-    } catch (error, stackTrace) {
-      debugPrint("Retry generation failed: $error\n$stackTrace");
-      if (!mounted || !_activeMessageIds.contains(assistantId)) return;
-      finalStatus = aiService.isCancelled ? MessageStatus.completed : MessageStatus.failed;
-      finalText = response.toString();
-    }
-
-    if (!mounted || !_activeMessageIds.contains(assistantId)) return;
-    notifier.value = finalText;
-    await _completeMessage(assistantId, finalText, finalStatus, notifier);
+    // Delegate in-place background generation to GenerationManager
+    await genManager.startGeneration(
+      conversationId: failedAssistantMessage.conversationId,
+      assistantMessageId: failedAssistantMessage.id,
+      prompt: prompt,
+      systemPrompt: _activeBud?.systemPrompt,
+      conversationHistory: _messages.sublist(0, index),
+      createdAt: failedAssistantMessage.createdAt,
+      budId: failedAssistantMessage.budId,
+    );
   }
 
   Future<void> _sendMessage() async {
-    if (_isSubmitting || _isGenerating) return;
+    final genManager = context.read<GenerationManager>();
+    final isCurrentGenerating = _currentConversation != null &&
+        genManager.isGenerating(_currentConversation!.id);
+
+    if (_isSubmitting || isCurrentGenerating) return;
 
     final prompt = _textController.text.trim();
     if (prompt.isEmpty) return;
@@ -324,17 +298,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
       final savedUserMessage = savedMessages[0];
       final savedAssistantMessage = savedMessages[1];
-      final assistantId = savedAssistantMessage.id;
-      final notifier = ValueNotifier<String>("");
-
-      final settings = await _settingsRepository.getSettings();
-      final aiService = MacAiService(serverIp: settings.serverIp ?? '192.168.1.74');
-      _currentAiService = aiService;
 
       if (mounted) {
         setState(() {
-          _activeMessageIds.add(assistantId);
-          _streamingNotifiers[assistantId] = notifier;
           _isSubmitting = false;
           _messages
             ..add(savedUserMessage)
@@ -343,45 +309,16 @@ class _ChatScreenState extends State<ChatScreen> {
       }
       _scrollToLatest(force: true);
 
-      final response = StringBuffer();
-      var lastPublished = DateTime.fromMillisecondsSinceEpoch(0);
-      MessageStatus finalStatus;
-      String finalText;
-
-      try {
-        await for (final token in aiService.generateResponse(
-          prompt: prompt,
-          systemPrompt: _activeBud?.systemPrompt,
-          conversationHistory: _messages,
-        )) {
-          if (!mounted || !_activeMessageIds.contains(assistantId)) {
-            return;
-          }
-          response.write(token);
-          final currentTime = DateTime.now();
-          if (currentTime.difference(lastPublished).inMilliseconds >= 16) {
-            notifier.value = response.toString();
-            lastPublished = currentTime;
-          }
-        }
-        if (!mounted || !_activeMessageIds.contains(assistantId)) return;
-        notifier.value = response.toString();
-        finalStatus = aiService.isCancelled ? MessageStatus.completed : MessageStatus.completed;
-        finalText = response.toString();
-      } on AiServiceException catch (e) {
-        debugPrint('AI Service Error: ${e.message}');
-        if (!mounted || !_activeMessageIds.contains(assistantId)) return;
-        finalStatus = aiService.isCancelled ? MessageStatus.completed : MessageStatus.failed;
-        finalText = response.toString();
-      } catch (error, stackTrace) {
-        debugPrint("Chat response stream failed: $error\n$stackTrace");
-        if (!mounted || !_activeMessageIds.contains(assistantId)) return;
-        finalStatus = aiService.isCancelled ? MessageStatus.completed : MessageStatus.failed;
-        finalText = response.toString();
-      }
-      if (!mounted || !_activeMessageIds.contains(assistantId)) return;
-      notifier.value = finalText;
-      await _completeMessage(assistantId, finalText, finalStatus, notifier);
+      // Delegate background generation job to GenerationManager
+      await genManager.startGeneration(
+        conversationId: _currentConversation!.id,
+        assistantMessageId: savedAssistantMessage.id,
+        prompt: prompt,
+        systemPrompt: _activeBud?.systemPrompt,
+        conversationHistory: _messages,
+        createdAt: savedAssistantMessage.createdAt,
+        budId: savedAssistantMessage.budId,
+      );
     } catch (error, stackTrace) {
       debugPrint("Could not save chat message: $error\n$stackTrace");
       if (mounted) {
@@ -394,76 +331,41 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     } finally {
-      if (mounted && _isSubmitting) {
+      if (mounted) {
         setState(() => _isSubmitting = false);
       }
     }
   }
 
-  Future<void> _completeMessage(
-    int messageId,
-    String text,
-    MessageStatus status,
-    ValueNotifier<String> notifier,
-  ) async {
-    final index = _messages.indexWhere((message) => message.id == messageId);
-    if (index != -1) {
-      final oldMessage = _messages[index];
-      final updatedMsg = Message(
-        id: oldMessage.id,
-        conversationId: oldMessage.conversationId,
-        text: text,
-        role: oldMessage.role,
-        status: status,
-        createdAt: oldMessage.createdAt,
-        budId: oldMessage.budId,
-      );
+  void _checkAndSyncCompletedBackgroundJobs(GenerationManager genManager) {
+    if (_currentConversation == null || _messages.isEmpty) return;
 
-      try {
-        final savedId = await _messageRepository.saveMessageAndTouchConversation(updatedMsg);
-        if (savedId == null) {
+    final conversationId = _currentConversation!.id;
+    final isJobRunning = genManager.isGenerating(conversationId);
+
+    // If no background job is running, check if any message in _messages is stuck in 'pending'
+    if (!isJobRunning) {
+      bool needsRefresh = false;
+      for (final msg in _messages) {
+        if (msg.status == MessageStatus.pending) {
+          needsRefresh = true;
+          break;
+        }
+      }
+
+      if (needsRefresh) {
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (!mounted || _currentConversation == null) return;
+          final freshMessages = await _messageRepository
+              .getMessagesForConversationPaginated(_currentConversation!.id, limit: 50, offset: 0);
           if (mounted) {
             setState(() {
-              _activeMessageIds.remove(messageId);
-              _streamingNotifiers.remove(messageId);
+              _messages = freshMessages;
             });
           }
-          WidgetsBinding.instance.addPostFrameCallback((_) => notifier.dispose());
-          return;
-        }
-      } catch (error, stackTrace) {
-        debugPrint("Could not persist completed response: $error\n$stackTrace");
-        if (mounted) {
-          setState(() {
-            _activeMessageIds.remove(messageId);
-            _streamingNotifiers.remove(messageId);
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("The response could not be saved."),
-            ),
-          );
-        }
-        WidgetsBinding.instance.addPostFrameCallback((_) => notifier.dispose());
-        return;
-      }
-
-      if (mounted) {
-        setState(() {
-          _messages[index] = updatedMsg;
-          _activeMessageIds.remove(messageId);
-          _streamingNotifiers.remove(messageId);
-        });
-      }
-    } else {
-      if (mounted) {
-        setState(() {
-          _activeMessageIds.remove(messageId);
-          _streamingNotifiers.remove(messageId);
         });
       }
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => notifier.dispose());
   }
 
   @override
@@ -471,10 +373,6 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollController.removeListener(_handleScroll);
     _textController.dispose();
     _scrollController.dispose();
-    for (final notifier in _streamingNotifiers.values) {
-      notifier.dispose();
-    }
-    _streamingNotifiers.clear();
     super.dispose();
   }
 
@@ -483,6 +381,14 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
+
+    final genManager = context.watch<GenerationManager>();
+    final isGeneratingThisChat = _currentConversation != null &&
+        genManager.isGenerating(_currentConversation!.id);
+    final isInputGenerating = isGeneratingThisChat || _isSubmitting;
+
+    // Automatically sync completed background jobs when GenerationManager notifies
+    _checkAndSyncCompletedBackgroundJobs(genManager);
 
     return Column(
       children: [
@@ -540,10 +446,14 @@ class _ChatScreenState extends State<ChatScreen> {
                     final isLatestMessage =
                         _messages.isNotEmpty && _messages.last.id == message.id;
 
+                    final activeNotifier = _currentConversation != null
+                        ? genManager.getNotifier(_currentConversation!.id, message.id)
+                        : null;
+
                     return MessageBubble(
                       key: ValueKey(message.id),
                       message: message,
-                      textListenable: _streamingNotifiers[message.id],
+                      textListenable: activeNotifier,
                       isLatest: isLatestMessage,
                       onRetry: () => _retryMessage(message),
                     );
@@ -564,7 +474,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         ChatInput(
           controller: _textController,
-          isGenerating: _isGenerating,
+          isGenerating: isInputGenerating,
           onSend: _sendMessage,
           onStop: _stopGeneration,
           onAddAttachment: () {},
