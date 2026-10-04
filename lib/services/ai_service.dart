@@ -12,6 +12,8 @@ abstract class AiService {
     String? systemPrompt,
     List<Message>? conversationHistory,
   });
+
+  void stopGeneration();
 }
 
 class MacAiService implements AiService {
@@ -26,9 +28,7 @@ class MacAiService implements AiService {
   MacAiService({
     this.serverIp = '192.168.1.74',
     this.port = '11434',
-    // this.modelName = 'llama3.1:8b-instruct-q3_K_M',
     this.modelName = 'qwen3:0.6b',
-    // this.modelName = 'llama3.2:1b',
   });
 
   String get baseUrl {
@@ -39,6 +39,27 @@ class MacAiService implements AiService {
     return 'http://$ip:$port';
   }
 
+  Future<List<String>> fetchAvailableModels() async {
+    try {
+      final response = await http
+          .get(Uri.parse('$baseUrl/api/tags'))
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = jsonDecode(response.body);
+        final List<dynamic> modelsList = data['models'] as List<dynamic>? ?? [];
+        return modelsList
+            .map((m) => (m is Map ? m['name'] as String? : null) ?? '')
+            .where((name) => name.isNotEmpty)
+            .toList();
+      }
+      return [];
+    } catch (e) {
+      debugPrint("Error fetching Ollama models from $baseUrl/api/tags: $e");
+      return [];
+    }
+  }
+
   @override
   Stream<String> generateResponse({
     required String prompt,
@@ -47,7 +68,6 @@ class MacAiService implements AiService {
   }) async* {
     _isCancelled = false;
     try {
-      // 9 & 10. Multi-turn conversation context with sliding window limit (last 10 messages)
       final List<Map<String, String>> chatMessages = [];
 
       if (systemPrompt != null && systemPrompt.isNotEmpty) {
@@ -58,12 +78,10 @@ class MacAiService implements AiService {
       }
 
       if (conversationHistory != null && conversationHistory.isNotEmpty) {
-        // Filter out empty/failed messages
         final validHistory = conversationHistory
             .where((m) => m.text.isNotEmpty && m.status != MessageStatus.failed)
             .toList();
 
-        // Enforce context limit: Take last 10 messages max (~1500 tokens)
         final boundedHistory = validHistory.length > 10
             ? validHistory.sublist(validHistory.length - 10)
             : validHistory;
@@ -81,7 +99,6 @@ class MacAiService implements AiService {
         });
       }
 
-      // Use Ollama's /api/chat endpoint for multi-turn chat history
       final request = http.Request('POST', Uri.parse('$baseUrl/api/chat'));
       request.headers['Content-Type'] = 'application/json';
 
@@ -91,7 +108,6 @@ class MacAiService implements AiService {
         'stream': true,
       };
 
-      // Conditionally pass 'think': true for reasoning models
       final lowerModel = modelName.toLowerCase();
       if (lowerModel.contains('qwen3') ||
           lowerModel.contains('deepseek') ||
@@ -114,7 +130,6 @@ class MacAiService implements AiService {
         );
       }
 
-      // Transform raw byte stream into lines (NDJSON)
       final lines = response.stream
           .transform(utf8.decoder)
           .transform(const LineSplitter())
@@ -129,7 +144,6 @@ class MacAiService implements AiService {
         try {
           data = jsonDecode(line) as Map<String, dynamic>;
         } catch (_) {
-          // Handle malformed NDJSON lines safely
           continue;
         }
 
@@ -140,7 +154,6 @@ class MacAiService implements AiService {
           break;
         }
 
-        // 1. Dedicated 'thinking' or 'reasoning_content' JSON field
         final thinkingChunk = data['thinking'] as String? ??
             data['reasoning_content'] as String? ??
             (data['message'] is Map
@@ -156,13 +169,11 @@ class MacAiService implements AiService {
           continue;
         }
 
-        // If thinking ended, close the <think> tag
         if (inThinkingState) {
           inThinkingState = false;
           yield '\n</think>\n';
         }
 
-        // 2. Standard response text field from /api/chat or /api/generate
         final token = (data['message'] is Map
                 ? data['message']['content'] as String?
                 : null) ??
@@ -192,6 +203,7 @@ class MacAiService implements AiService {
     }
   }
 
+  @override
   void stopGeneration() {
     _isCancelled = true;
     _client?.close();

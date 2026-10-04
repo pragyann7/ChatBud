@@ -5,6 +5,7 @@ import 'package:chatbud/models/message.dart';
 import 'package:chatbud/repositories/message_repository.dart';
 import 'package:chatbud/repositories/settings_repository.dart';
 import 'package:chatbud/services/ai_service.dart';
+import 'package:chatbud/services/llama_cpp_service.dart';
 
 class ActiveGenerationJob {
   final int conversationId;
@@ -16,7 +17,7 @@ class ActiveGenerationJob {
   final int? budId;
   final ValueNotifier<String> notifier = ValueNotifier<String>("");
   final StringBuffer accumulatedText = StringBuffer();
-  MacAiService aiService;
+  final AiService aiService;
   bool isCompleted = false;
 
   ActiveGenerationJob({
@@ -81,7 +82,6 @@ class GenerationManager extends ChangeNotifier {
     required DateTime createdAt,
     int? budId,
   }) async {
-    // Clear unread indicator when starting a new generation for this chat
     _unreadCompletedIds.remove(conversationId);
 
     if (_activeJobs.containsKey(conversationId)) {
@@ -89,8 +89,14 @@ class GenerationManager extends ChangeNotifier {
     }
 
     final settings = await settingsRepository.getSettings();
-    final serverIp = settings.serverIp ?? '192.168.1.74';
-    final aiService = MacAiService(serverIp: serverIp);
+    final AiService aiService;
+
+    if (settings.engineType == 'llama_cpp') {
+      aiService = LlamaCppAiService(modelPath: settings.modelPath);
+    } else {
+      final serverIp = settings.serverIp ?? '192.168.1.74';
+      aiService = MacAiService(serverIp: serverIp);
+    }
 
     final job = ActiveGenerationJob(
       conversationId: conversationId,
@@ -127,33 +133,24 @@ class GenerationManager extends ChangeNotifier {
         }
       }
       job.notifier.value = job.accumulatedText.toString();
-      finalStatus = job.aiService.isCancelled
-          ? MessageStatus.completed
-          : MessageStatus.completed;
+      finalStatus = MessageStatus.completed;
     } on AiServiceException catch (e) {
       debugPrint("Background AI Service Error ($e) in conv ${job.conversationId}");
-      finalStatus = job.aiService.isCancelled
-          ? MessageStatus.completed
-          : MessageStatus.failed;
+      finalStatus = MessageStatus.failed;
     } catch (e, stackTrace) {
       debugPrint("Background Stream Error ($e) in conv ${job.conversationId}\n$stackTrace");
-      finalStatus = job.aiService.isCancelled
-          ? MessageStatus.completed
-          : MessageStatus.failed;
+      finalStatus = MessageStatus.failed;
     } finally {
       final finalText = job.accumulatedText.toString();
       job.notifier.value = finalText;
 
-      // 1. Persist response FIRST to Isar DB before releasing active job status
       await _persistMessageResponse(job, finalText, finalStatus);
 
-      // 2. Mark completed & add to unread completed set
       job.isCompleted = true;
       _activeJobs.remove(job.conversationId);
       _unreadCompletedIds.add(job.conversationId);
       notifyListeners();
 
-      // 3. Dispose notifier after frame
       WidgetsBinding.instance.addPostFrameCallback((_) {
         job.notifier.dispose();
       });

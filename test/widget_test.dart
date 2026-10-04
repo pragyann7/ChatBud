@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:chatbud/main.dart';
+import 'package:chatbud/models/app_settings.dart';
 import 'package:chatbud/models/bud.dart';
 import 'package:chatbud/models/conversation.dart';
 import 'package:chatbud/models/message.dart';
@@ -42,6 +43,9 @@ class _FakeBudRepository implements BudRepository {
 }
 
 class _FakeSettingsRepository implements SettingsRepository {
+  @override
+  Stream<AppSettings?> watchSettings() => Stream.value(AppSettings());
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
