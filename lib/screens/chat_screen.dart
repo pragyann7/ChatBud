@@ -1,11 +1,16 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:chatbud/models/app_settings.dart';
 import 'package:chatbud/models/bud.dart';
 import 'package:chatbud/models/conversation.dart';
 import 'package:chatbud/models/message.dart';
 import 'package:chatbud/repositories/bud_repository.dart';
 import 'package:chatbud/repositories/conversation_repository.dart';
 import 'package:chatbud/repositories/message_repository.dart';
+import 'package:chatbud/repositories/settings_repository.dart';
+import 'package:chatbud/screens/model_hub_screen.dart';
 import 'package:chatbud/services/generation_manager.dart';
+import 'package:chatbud/services/llama_cpp_service.dart';
 import 'package:chatbud/widgets/bud_selector.dart';
 import 'package:chatbud/widgets/chat_input.dart';
 import 'package:chatbud/widgets/message_bubble.dart';
@@ -29,12 +34,14 @@ class _ChatScreenState extends State<ChatScreen> {
   late ConversationRepository _conversationRepository;
   late MessageRepository _messageRepository;
   late BudRepository _budRepository;
+  late SettingsRepository _settingsRepository;
 
   Conversation? _currentConversation;
   Bud? _activeBud; // null = No Bud / Raw LLM
   List<Message> _messages = [];
   bool _isLoading = true;
   bool _isSubmitting = false;
+  bool _isModelLoading = false;
 
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -53,6 +60,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _conversationRepository = context.read<ConversationRepository>();
       _messageRepository = context.read<MessageRepository>();
       _budRepository = context.read<BudRepository>();
+      _settingsRepository = context.read<SettingsRepository>();
       _loadActiveConversationAndMessages();
     }
   }
@@ -71,7 +79,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
         for (int i = 0; i < savedMessages.length; i++) {
           final msg = savedMessages[i];
-          // Recover abandoned 'pending' messages from killed/crashed app sessions
           if (msg.status == MessageStatus.pending && !isJobActive) {
             final recovered = Message(
               id: msg.id,
@@ -174,10 +181,69 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _showModelRequiredDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text("GGUF Model Required"),
+          content: const Text(
+            "To use 100% offline llama.cpp inference, please download a model from Model Hub or select a local .gguf file.",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ModelHubScreen()),
+                );
+              },
+              icon: const Icon(Icons.cloud_download_rounded, size: 18),
+              label: const Text("Open Model Hub"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _loadLocalGgufModel(String modelPath) async {
+    setState(() => _isModelLoading = true);
+    await LlamaCppAiService.loadModel(modelPath);
+    if (mounted) {
+      setState(() => _isModelLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Model loaded into RAM successfully!")),
+      );
+    }
+  }
+
+  void _unloadLocalGgufModel() async {
+    await LlamaCppAiService.unloadModel();
+    if (mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Model unloaded from RAM.")),
+      );
+    }
+  }
+
   Future<void> _retryMessage(Message failedAssistantMessage) async {
     final genManager = context.read<GenerationManager>();
     if (_currentConversation != null &&
         genManager.isGenerating(_currentConversation!.id)) {
+      return;
+    }
+
+    final settings = await _settingsRepository.getSettings();
+    if (settings.engineType == 'llama_cpp' &&
+        (settings.modelPath == null || !File(settings.modelPath!).existsSync())) {
+      _showModelRequiredDialog();
       return;
     }
 
@@ -215,10 +281,8 @@ class _ChatScreenState extends State<ChatScreen> {
       });
     }
 
-    // Persist pending status to Isar DB so DB matches active generation state
     await _messageRepository.saveMessageAndTouchConversation(pendingMsg);
 
-    // Delegate in-place background generation to GenerationManager
     await genManager.startGeneration(
       conversationId: failedAssistantMessage.conversationId,
       assistantMessageId: failedAssistantMessage.id,
@@ -239,6 +303,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final prompt = _textController.text.trim();
     if (prompt.isEmpty) return;
+
+    final settings = await _settingsRepository.getSettings();
+    if (settings.engineType == 'llama_cpp' &&
+        (settings.modelPath == null || !File(settings.modelPath!).existsSync())) {
+      _showModelRequiredDialog();
+      return;
+    }
 
     final isNewConversation = _currentConversation == null;
     _isSubmitting = true;
@@ -309,7 +380,6 @@ class _ChatScreenState extends State<ChatScreen> {
       }
       _scrollToLatest(force: true);
 
-      // Delegate background generation job to GenerationManager
       await genManager.startGeneration(
         conversationId: _currentConversation!.id,
         assistantMessageId: savedAssistantMessage.id,
@@ -343,7 +413,6 @@ class _ChatScreenState extends State<ChatScreen> {
     final conversationId = _currentConversation!.id;
     final isJobRunning = genManager.isGenerating(conversationId);
 
-    // If no background job is running, check if any message in _messages is stuck in 'pending'
     if (!isJobRunning) {
       bool needsRefresh = false;
       for (final msg in _messages) {
@@ -387,7 +456,6 @@ class _ChatScreenState extends State<ChatScreen> {
         genManager.isGenerating(_currentConversation!.id);
     final isInputGenerating = isGeneratingThisChat || _isSubmitting;
 
-    // Automatically sync completed background jobs when GenerationManager notifies
     _checkAndSyncCompletedBackgroundJobs(genManager);
 
     return Column(
@@ -406,6 +474,102 @@ class _ChatScreenState extends State<ChatScreen> {
               const Spacer(),
             ],
           ),
+        ),
+        // llama.cpp On-Device Model Status Bar
+        StreamBuilder<AppSettings?>(
+          stream: _settingsRepository.watchSettings(),
+          builder: (context, snapshot) {
+            final settings = snapshot.data;
+            if (settings?.engineType != 'llama_cpp') {
+              return const SizedBox.shrink();
+            }
+
+            final modelPath = settings?.modelPath;
+            final isLoaded = LlamaCppAiService.isModelLoaded;
+            final fileName = modelPath != null ? modelPath.split('/').last : null;
+
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              color: Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest
+                  .withOpacity(0.5),
+              child: Row(
+                children: [
+                  Icon(
+                    isLoaded ? Icons.bolt_rounded : Icons.memory_rounded,
+                    size: 16,
+                    color: isLoaded
+                        ? Colors.green
+                        : Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      isLoaded
+                          ? "Loaded: ${fileName ?? 'Model'} (RAM Active)"
+                          : (fileName != null
+                              ? "Model Ready: $fileName"
+                              : "No Model Loaded"),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: isLoaded
+                            ? Colors.green
+                            : Theme.of(context).colorScheme.primary,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (_isModelLoading)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else if (isLoaded)
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: _unloadLocalGgufModel,
+                      child: const Text("Unload RAM",
+                          style: TextStyle(fontSize: 11)),
+                    )
+                  else if (fileName != null)
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: () => _loadLocalGgufModel(modelPath!),
+                      icon: const Icon(Icons.bolt_rounded, size: 14),
+                      label: const Text("Load Model",
+                          style: TextStyle(fontSize: 11)),
+                    )
+                  else
+                    TextButton.icon(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: _showModelRequiredDialog,
+                      icon: const Icon(Icons.cloud_download_rounded, size: 14),
+                      label: const Text("Model Hub",
+                          style: TextStyle(fontSize: 11)),
+                    ),
+                ],
+              ),
+            );
+          },
         ),
         const Divider(height: 1),
         Expanded(
@@ -432,6 +596,18 @@ class _ChatScreenState extends State<ChatScreen> {
                               color: Theme.of(context).colorScheme.secondary,
                             ),
                         textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (context) => const ModelHubScreen()),
+                          );
+                        },
+                        icon: const Icon(Icons.cloud_download_rounded, size: 18),
+                        label: const Text("Model Hub (Download GGUF)"),
                       ),
                     ],
                   ),

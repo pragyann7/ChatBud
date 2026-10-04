@@ -15,6 +15,27 @@
 *.bak
 Thumbs.db
 
+# Isar Database & Storage
+*.isar
+*.isar.lock
+
+# Downloaded AI Models (GGUF Files)
+*.gguf
+**/models/*.gguf
+**/app_flutter/
+
+# Native C/C++ Build Outputs & Dynamic Libraries
+*.dylib
+*.so
+*.dll
+*.o
+*.a
+native/*.dylib
+native/*.so
+native/*.dll
+native/*.o
+native/*.a
+
 # Gradle Build Reports & Logs
 *problems-report*.html
 *problem-report*.html
@@ -22,18 +43,11 @@ Thumbs.db
 **/android/build/
 **/android/app/build/
 
-# Native dynamic libraries
-*.dylib
-*.so
-*.dll
-
-# IntelliJ related
+# IntelliJ / Android Studio / VS Code related
 *.iml
 *.ipr
 *.iws
 .idea/
-
-# Visual Studio Code & IDE Caches
 .vscode/
 .artifacts/
 
@@ -81,4 +95,3 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
-/PROJECT_HANDOFF.md

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:chatbud/database/database.dart';
 import 'package:chatbud/models/conversation.dart';
 import 'package:chatbud/repositories/bud_repository.dart';
@@ -7,7 +8,9 @@ import 'package:chatbud/repositories/message_repository.dart';
 import 'package:chatbud/repositories/settings_repository.dart';
 import 'package:chatbud/screens/buds_screen.dart';
 import 'package:chatbud/screens/chat_screen.dart';
+import 'package:chatbud/screens/model_hub_screen.dart';
 import 'package:chatbud/services/generation_manager.dart';
+import 'package:chatbud/services/huggingface_service.dart';
 import 'package:provider/provider.dart';
 
 Future<void> main() async {
@@ -221,63 +224,251 @@ class AppDrawer extends StatelessWidget {
   void _showServerSettingsDialog(BuildContext context) async {
     final settingsRepo = context.read<SettingsRepository>();
     final currentSettings = await settingsRepo.getSettings();
+    final hfService = HuggingFaceService();
+    final downloadedFiles = await hfService.getDownloadedGgufFiles();
+
     final controller = TextEditingController(
       text: currentSettings.serverIp ?? '192.168.1.74',
     );
+    String selectedEngine = currentSettings.engineType;
+    String? selectedModelPath = currentSettings.modelPath;
 
     if (!context.mounted) return;
 
     showDialog(
       context: context,
       builder: (ctx) {
-        return AlertDialog(
-          title: const Text("AI Server Settings"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                "Enter your local Ollama server IP address:",
-                style: TextStyle(fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                keyboardType: TextInputType.text,
-                decoration: const InputDecoration(
-                  labelText: "Server IP / Host",
-                  hintText: "e.g., 192.168.1.74 or 10.177.114.245",
-                  border: OutlineInputBorder(),
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final fileName = selectedModelPath != null
+                ? selectedModelPath!.split('/').last
+                : "No GGUF file selected";
+
+            return AlertDialog(
+              title: const Text("AI Engine & Settings"),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Inference Engine:",
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment<String>(
+                          value: 'ollama',
+                          label: Text('Ollama'),
+                          icon: Icon(Icons.wifi_rounded, size: 16),
+                        ),
+                        ButtonSegment<String>(
+                          value: 'llama_cpp',
+                          label: Text('llama.cpp'),
+                          icon: Icon(Icons.memory_rounded, size: 16),
+                        ),
+                      ],
+                      selected: {selectedEngine},
+                      onSelectionChanged: (Set<String> selection) {
+                        setDialogState(() {
+                          selectedEngine = selection.first;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    if (selectedEngine == 'ollama') ...[
+                      const Text(
+                        "Enter local Ollama server IP address:",
+                        style: TextStyle(fontSize: 13),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: controller,
+                        keyboardType: TextInputType.text,
+                        decoration: const InputDecoration(
+                          labelText: "Server IP / Host",
+                          hintText: "e.g., 192.168.1.74",
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ] else ...[
+                      const Text(
+                        "Select On-Device GGUF Model:",
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      if (downloadedFiles.isNotEmpty) ...[
+                        DropdownButtonFormField<String>(
+                          value: downloadedFiles.any((f) => f.path == selectedModelPath)
+                              ? selectedModelPath
+                              : null,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            contentPadding:
+                                EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            labelText: "Downloaded Models",
+                          ),
+                          hint: const Text("Select a downloaded model"),
+                          items: downloadedFiles.map((file) {
+                            final name = file.path.split('/').last;
+                            return DropdownMenuItem<String>(
+                              value: file.path,
+                              child: Text(
+                                name,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontSize: 12, fontWeight: FontWeight.bold),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            setDialogState(() {
+                              selectedModelPath = val;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest
+                              .withOpacity(0.6),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .outlineVariant
+                                .withOpacity(0.5),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.insert_drive_file_outlined,
+                                  size: 18,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    fileName,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 6),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    onPressed: () async {
+                                      final result =
+                                          await FilePicker.platform.pickFiles(
+                                        type: FileType.any,
+                                      );
+                                      if (result != null &&
+                                          result.files.isNotEmpty &&
+                                          result.files.single.path != null) {
+                                        setDialogState(() {
+                                          selectedModelPath = result.files.single.path;
+                                        });
+                                      }
+                                    },
+                                    icon: const Icon(Icons.folder_open_rounded, size: 14),
+                                    label: const Text(
+                                      "Browse Storage",
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: FilledButton.icon(
+                                    style: FilledButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 6),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    onPressed: () {
+                                      Navigator.pop(ctx);
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => const ModelHubScreen(),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(Icons.cloud_download_rounded, size: 14),
+                                    label: const Text(
+                                      "Model Hub",
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text("Cancel"),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final newIp = controller.text.trim();
-                if (newIp.isNotEmpty) {
-                  await settingsRepo.updateServerIp(newIp);
-                  if (ctx.mounted) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(
-                      SnackBar(
-                        content: Text("Server IP updated to: $newIp"),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text("Cancel"),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final newIp = controller.text.trim();
+                    await settingsRepo.saveSettings(
+                      currentSettings.copyWith(
+                        serverIp:
+                            newIp.isNotEmpty ? newIp : currentSettings.serverIp,
+                        engineType: selectedEngine,
+                        modelPath: selectedModelPath,
                       ),
                     );
-                  }
-                }
-                if (ctx.mounted) {
-                  Navigator.pop(ctx);
-                }
-              },
-              child: const Text("Save"),
-            ),
-          ],
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            selectedEngine == 'llama_cpp'
+                                ? "Switched to 100% Offline llama.cpp FFI Engine"
+                                : "Server IP updated to: $newIp",
+                          ),
+                        ),
+                      );
+                      Navigator.pop(ctx);
+                    }
+                  },
+                  child: const Text("Save"),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -458,6 +649,17 @@ class AppDrawer extends StatelessWidget {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (context) => const BudsScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.cloud_download_outlined),
+              title: const Text("Model Hub (Download GGUF)"),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ModelHubScreen()),
                 );
               },
             ),

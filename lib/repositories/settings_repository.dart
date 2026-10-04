@@ -16,6 +16,7 @@ class SettingsRepository {
       id: _settingsId,
       theme: 'system',
       serverIp: '192.168.1.74',
+      engineType: 'ollama',
     );
     await saveSettings(defaultSettings);
     return defaultSettings;
@@ -27,6 +28,8 @@ class SettingsRepository {
       theme: settings.theme,
       selectedModel: settings.selectedModel,
       serverIp: settings.serverIp,
+      engineType: settings.engineType,
+      modelPath: settings.modelPath,
     );
     await isar.writeTxn(() async {
       await isar.appSettings.put(settingsToSave);
@@ -55,5 +58,20 @@ class SettingsRepository {
   Future<void> updateServerIp(String ip) async {
     final current = await getSettings();
     await saveSettings(current.copyWith(serverIp: ip.trim()));
+  }
+
+  Future<void> updateEngineType(String engine) async {
+    final current = await getSettings();
+    await saveSettings(current.copyWith(engineType: engine));
+  }
+
+  Future<void> updateModelPath(String? path) async {
+    final current = await getSettings();
+    await saveSettings(
+      current.copyWith(
+        modelPath: path,
+        clearModelPath: path == null || path.trim().isEmpty,
+      ),
+    );
   }
 }
