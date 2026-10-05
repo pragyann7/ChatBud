@@ -10,6 +10,9 @@ class AppSettings {
   final String? serverIp;
   final String engineType; // 'ollama' or 'llama_cpp'
   final String? modelPath; // Path to local .gguf file
+  final int cpuThreads; // Default: 4 CPU threads
+  final int contextSize; // Default: 2048 token window
+  final int batchSize; // Default: 512 tokens
 
   AppSettings({
     this.id = 1,
@@ -18,6 +21,9 @@ class AppSettings {
     this.serverIp = '192.168.1.74',
     this.engineType = 'ollama',
     this.modelPath,
+    this.cpuThreads = 4,
+    this.contextSize = 2048,
+    this.batchSize = 512,
   });
 
   AppSettings copyWith({
@@ -29,6 +35,9 @@ class AppSettings {
     String? engineType,
     String? modelPath,
     bool clearModelPath = false,
+    int? cpuThreads,
+    int? contextSize,
+    int? batchSize,
   }) {
     return AppSettings(
       id: id ?? this.id,
@@ -38,6 +47,9 @@ class AppSettings {
       serverIp: serverIp ?? this.serverIp,
       engineType: engineType ?? this.engineType,
       modelPath: clearModelPath ? null : (modelPath ?? this.modelPath),
+      cpuThreads: cpuThreads ?? this.cpuThreads,
+      contextSize: contextSize ?? this.contextSize,
+      batchSize: batchSize ?? this.batchSize,
     );
   }
 }

@@ -17,28 +17,43 @@ const AppSettingsSchema = CollectionSchema(
   name: r'AppSettings',
   id: -5633561779022347008,
   properties: {
-    r'engineType': PropertySchema(
+    r'batchSize': PropertySchema(
       id: 0,
+      name: r'batchSize',
+      type: IsarType.long,
+    ),
+    r'contextSize': PropertySchema(
+      id: 1,
+      name: r'contextSize',
+      type: IsarType.long,
+    ),
+    r'cpuThreads': PropertySchema(
+      id: 2,
+      name: r'cpuThreads',
+      type: IsarType.long,
+    ),
+    r'engineType': PropertySchema(
+      id: 3,
       name: r'engineType',
       type: IsarType.string,
     ),
     r'modelPath': PropertySchema(
-      id: 1,
+      id: 4,
       name: r'modelPath',
       type: IsarType.string,
     ),
     r'selectedModel': PropertySchema(
-      id: 2,
+      id: 5,
       name: r'selectedModel',
       type: IsarType.string,
     ),
     r'serverIp': PropertySchema(
-      id: 3,
+      id: 6,
       name: r'serverIp',
       type: IsarType.string,
     ),
     r'theme': PropertySchema(
-      id: 4,
+      id: 7,
       name: r'theme',
       type: IsarType.string,
     )
@@ -92,11 +107,14 @@ void _appSettingsSerialize(
   List<int> offsets,
   Map<Type, List<int>> allOffsets,
 ) {
-  writer.writeString(offsets[0], object.engineType);
-  writer.writeString(offsets[1], object.modelPath);
-  writer.writeString(offsets[2], object.selectedModel);
-  writer.writeString(offsets[3], object.serverIp);
-  writer.writeString(offsets[4], object.theme);
+  writer.writeLong(offsets[0], object.batchSize);
+  writer.writeLong(offsets[1], object.contextSize);
+  writer.writeLong(offsets[2], object.cpuThreads);
+  writer.writeString(offsets[3], object.engineType);
+  writer.writeString(offsets[4], object.modelPath);
+  writer.writeString(offsets[5], object.selectedModel);
+  writer.writeString(offsets[6], object.serverIp);
+  writer.writeString(offsets[7], object.theme);
 }
 
 AppSettings _appSettingsDeserialize(
@@ -106,12 +124,15 @@ AppSettings _appSettingsDeserialize(
   Map<Type, List<int>> allOffsets,
 ) {
   final object = AppSettings(
-    engineType: reader.readStringOrNull(offsets[0]) ?? 'ollama',
+    batchSize: reader.readLongOrNull(offsets[0]) ?? 512,
+    contextSize: reader.readLongOrNull(offsets[1]) ?? 2048,
+    cpuThreads: reader.readLongOrNull(offsets[2]) ?? 4,
+    engineType: reader.readStringOrNull(offsets[3]) ?? 'ollama',
     id: id,
-    modelPath: reader.readStringOrNull(offsets[1]),
-    selectedModel: reader.readStringOrNull(offsets[2]),
-    serverIp: reader.readStringOrNull(offsets[3]),
-    theme: reader.readStringOrNull(offsets[4]) ?? 'system',
+    modelPath: reader.readStringOrNull(offsets[4]),
+    selectedModel: reader.readStringOrNull(offsets[5]),
+    serverIp: reader.readStringOrNull(offsets[6]),
+    theme: reader.readStringOrNull(offsets[7]) ?? 'system',
   );
   return object;
 }
@@ -124,14 +145,20 @@ P _appSettingsDeserializeProp<P>(
 ) {
   switch (propertyId) {
     case 0:
-      return (reader.readStringOrNull(offset) ?? 'ollama') as P;
+      return (reader.readLongOrNull(offset) ?? 512) as P;
     case 1:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readLongOrNull(offset) ?? 2048) as P;
     case 2:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readLongOrNull(offset) ?? 4) as P;
     case 3:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readStringOrNull(offset) ?? 'ollama') as P;
     case 4:
+      return (reader.readStringOrNull(offset)) as P;
+    case 5:
+      return (reader.readStringOrNull(offset)) as P;
+    case 6:
+      return (reader.readStringOrNull(offset)) as P;
+    case 7:
       return (reader.readStringOrNull(offset) ?? 'system') as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -231,6 +258,174 @@ extension AppSettingsQueryWhere
 
 extension AppSettingsQueryFilter
     on QueryBuilder<AppSettings, AppSettings, QFilterCondition> {
+  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
+      batchSizeEqualTo(int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'batchSize',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
+      batchSizeGreaterThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'batchSize',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
+      batchSizeLessThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'batchSize',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
+      batchSizeBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'batchSize',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
+      contextSizeEqualTo(int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'contextSize',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
+      contextSizeGreaterThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'contextSize',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
+      contextSizeLessThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'contextSize',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
+      contextSizeBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'contextSize',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
+      cpuThreadsEqualTo(int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'cpuThreads',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
+      cpuThreadsGreaterThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'cpuThreads',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
+      cpuThreadsLessThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'cpuThreads',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
+      cpuThreadsBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'cpuThreads',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
   QueryBuilder<AppSettings, AppSettings, QAfterFilterCondition>
       engineTypeEqualTo(
     String value, {
@@ -1022,6 +1217,42 @@ extension AppSettingsQueryLinks
 
 extension AppSettingsQuerySortBy
     on QueryBuilder<AppSettings, AppSettings, QSortBy> {
+  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> sortByBatchSize() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'batchSize', Sort.asc);
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> sortByBatchSizeDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'batchSize', Sort.desc);
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> sortByContextSize() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'contextSize', Sort.asc);
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> sortByContextSizeDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'contextSize', Sort.desc);
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> sortByCpuThreads() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'cpuThreads', Sort.asc);
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> sortByCpuThreadsDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'cpuThreads', Sort.desc);
+    });
+  }
+
   QueryBuilder<AppSettings, AppSettings, QAfterSortBy> sortByEngineType() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'engineType', Sort.asc);
@@ -1086,6 +1317,42 @@ extension AppSettingsQuerySortBy
 
 extension AppSettingsQuerySortThenBy
     on QueryBuilder<AppSettings, AppSettings, QSortThenBy> {
+  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> thenByBatchSize() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'batchSize', Sort.asc);
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> thenByBatchSizeDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'batchSize', Sort.desc);
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> thenByContextSize() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'contextSize', Sort.asc);
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> thenByContextSizeDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'contextSize', Sort.desc);
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> thenByCpuThreads() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'cpuThreads', Sort.asc);
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QAfterSortBy> thenByCpuThreadsDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'cpuThreads', Sort.desc);
+    });
+  }
+
   QueryBuilder<AppSettings, AppSettings, QAfterSortBy> thenByEngineType() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'engineType', Sort.asc);
@@ -1162,6 +1429,24 @@ extension AppSettingsQuerySortThenBy
 
 extension AppSettingsQueryWhereDistinct
     on QueryBuilder<AppSettings, AppSettings, QDistinct> {
+  QueryBuilder<AppSettings, AppSettings, QDistinct> distinctByBatchSize() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'batchSize');
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QDistinct> distinctByContextSize() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'contextSize');
+    });
+  }
+
+  QueryBuilder<AppSettings, AppSettings, QDistinct> distinctByCpuThreads() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'cpuThreads');
+    });
+  }
+
   QueryBuilder<AppSettings, AppSettings, QDistinct> distinctByEngineType(
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
@@ -1204,6 +1489,24 @@ extension AppSettingsQueryProperty
   QueryBuilder<AppSettings, int, QQueryOperations> idProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'id');
+    });
+  }
+
+  QueryBuilder<AppSettings, int, QQueryOperations> batchSizeProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'batchSize');
+    });
+  }
+
+  QueryBuilder<AppSettings, int, QQueryOperations> contextSizeProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'contextSize');
+    });
+  }
+
+  QueryBuilder<AppSettings, int, QQueryOperations> cpuThreadsProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'cpuThreads');
     });
   }
 

@@ -17,6 +17,9 @@ class SettingsRepository {
       theme: 'system',
       serverIp: '192.168.1.74',
       engineType: 'ollama',
+      cpuThreads: 4,
+      contextSize: 2048,
+      batchSize: 512,
     );
     await saveSettings(defaultSettings);
     return defaultSettings;
@@ -30,6 +33,9 @@ class SettingsRepository {
       serverIp: settings.serverIp,
       engineType: settings.engineType,
       modelPath: settings.modelPath,
+      cpuThreads: settings.cpuThreads,
+      contextSize: settings.contextSize,
+      batchSize: settings.batchSize,
     );
     await isar.writeTxn(() async {
       await isar.appSettings.put(settingsToSave);
@@ -71,6 +77,21 @@ class SettingsRepository {
       current.copyWith(
         modelPath: path,
         clearModelPath: path == null || path.trim().isEmpty,
+      ),
+    );
+  }
+
+  Future<void> updateInferenceParams({
+    int? cpuThreads,
+    int? contextSize,
+    int? batchSize,
+  }) async {
+    final current = await getSettings();
+    await saveSettings(
+      current.copyWith(
+        cpuThreads: cpuThreads,
+        contextSize: contextSize,
+        batchSize: batchSize,
       ),
     );
   }
