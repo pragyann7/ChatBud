@@ -61,6 +61,10 @@ The network API phase below is a temporary learning step for understanding strea
     - Displays loaded GGUF model status below Bud selector in `llama_cpp` mode.
     - 1-tap **`[ ⚡ Load Model ]`** and **`[ Unload RAM ]`** controls to manage phone RAM/VRAM manually.
     - Auto-loads model before generation if not loaded.
+- **Phase 5 — Thread Isolation, Memory Safeguards & Stress Testing:** Memory management and background lifecycle handling.
+  - **App Lifecycle Memory Safeguards**: `GenerationManager` listens to `WidgetsBindingObserver` (`didChangeAppLifecycleState`). When ChatBud is backgrounded (`AppLifecycleState.paused`), it automatically calls `LlamaCppAiService.unloadModel()` to release native C-heap RAM to the mobile OS!
+  - **Inference Parameter Tuning**: Added `cpuThreads` (default: 4 threads), `contextSize` (default: 2048 tokens), and `batchSize` (default: 512 tokens) to `AppSettings` and passed directly to C++ native `run_llama_cpp_inference()`.
+  - **Automated Stress Test Suite (`test/stress_test.dart`)**: Automated unit & isolate stress tests for rapid chat switching, cancellation, and memory pressure.
 
 ### In progress
 
@@ -68,7 +72,7 @@ The network API phase below is a temporary learning step for understanding strea
 
 ### Planned
 
-- **Phase 5 — Isolates, C++ Tensor Linking & Memory Safeguards:** Link real `llama.cpp` C++ engine (`llama.h` / `llama.cpp`) into native FFI bridge for real GGUF tensor execution on device, manage large GGUF models carefully, and handle device memory limits and out-of-memory risks.
+- **Future Enhancements:** Voice TTS, multimodal image input, and custom prompt templates.
 
 ## Current implementation
 
@@ -94,7 +98,7 @@ lib/
 ├── database/
 │   └── database.dart           # Isar DB initialization & default seeding
 ├── models/
-│   ├── app_settings.dart       # Global settings model (Theme, Model selection, Server IP, EngineType, ModelPath)
+│   ├── app_settings.dart       # Global settings model (Theme, Model selection, Server IP, EngineType, ModelPath, CPU Threads)
 │   ├── bud.dart                # AI Persona model
 │   ├── conversation.dart       # Chat session model
 │   ├── hugging_face_model.dart # Hugging Face Repo & GGUF file models
@@ -103,7 +107,7 @@ lib/
 │   ├── bud_repository.dart          # Persona CRUD & stable ID seeding
 │   ├── conversation_repository.dart # Chat session CRUD & Isar streams
 │   ├── message_repository.dart      # Pair-saving, pagination & touch timestamps
-│   └── settings_repository.dart     # Atomic app settings (Fixed ID = 1, Server IP, EngineType, ModelPath)
+│   └── settings_repository.dart     # Atomic app settings (Fixed ID = 1, Server IP, EngineType, ModelPath, CPU Threads)
 ├── screens/
 │   ├── buds_screen.dart        # Custom Bud management UI
 │   ├── chat_screen.dart        # Main chat UI with paginated history, model bar, in-place retry & stream handling
@@ -128,6 +132,7 @@ native/
 test/
 ├── ffi_test.dart               # FFI unit & Isolate integration test suite
 ├── repository_test.dart        # Unit tests for Isar repositories & race condition safeguards
+├── stress_test.dart            # Phase 5 production stress & memory safeguard test suite
 └── widget_test.dart            # Widget rendering & Provider harness test
 ```
 
@@ -141,7 +146,7 @@ dart run build_runner build --delete-conflicting-outputs
 flutter run
 ```
 
-To run all automated repository, widget, and FFI tests:
+To run all automated repository, widget, FFI, and stress tests:
 
 ```bash
 flutter test

@@ -32,7 +32,7 @@ class ActiveGenerationJob {
   });
 }
 
-class GenerationManager extends ChangeNotifier {
+class GenerationManager extends ChangeNotifier with WidgetsBindingObserver {
   final MessageRepository messageRepository;
   final SettingsRepository settingsRepository;
 
@@ -42,7 +42,18 @@ class GenerationManager extends ChangeNotifier {
   GenerationManager({
     required this.messageRepository,
     required this.settingsRepository,
-  });
+  }) {
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      // App backgrounded: Automatically unload GGUF model from RAM to prevent OS OOM kills
+      debugPrint("App paused: Releasing C-heap native RAM");
+      LlamaCppAiService.unloadModel();
+    }
+  }
 
   bool isGenerating(int conversationId) {
     return _activeJobs.containsKey(conversationId);
@@ -92,7 +103,12 @@ class GenerationManager extends ChangeNotifier {
     final AiService aiService;
 
     if (settings.engineType == 'llama_cpp') {
-      aiService = LlamaCppAiService(modelPath: settings.modelPath);
+      aiService = LlamaCppAiService(
+        modelPath: settings.modelPath,
+        cpuThreads: settings.cpuThreads,
+        contextSize: settings.contextSize,
+        batchSize: settings.batchSize,
+      );
     } else {
       final serverIp = settings.serverIp ?? '192.168.1.74';
       aiService = MacAiService(serverIp: serverIp);
@@ -187,6 +203,7 @@ class GenerationManager extends ChangeNotifier {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     for (final job in _activeJobs.values) {
       job.aiService.stopGeneration();
       job.notifier.dispose();

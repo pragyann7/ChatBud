@@ -4,10 +4,11 @@ import 'dart:io';
 import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
+import 'package:llama_cpp_dart/llama_cpp_dart.dart' hide Message;
 import 'package:chatbud/models/message.dart';
 import 'package:chatbud/services/ai_service.dart';
 
-// Native C signatures
+// Native C signatures for fallback bridge
 typedef NativeRunLlamaCppInference = Int32 Function(
   Pointer<Utf8> modelPath,
   Pointer<Utf8> prompt,
@@ -37,6 +38,9 @@ class LlamaCppIsolateRequest {
   final String prompt;
   final String? systemPrompt;
   final String? modelPath;
+  final int nCtx;
+  final int nThreads;
+  final int batchSize;
   final SendPort sendPort;
 
   LlamaCppIsolateRequest({
@@ -44,11 +48,14 @@ class LlamaCppIsolateRequest {
     required this.prompt,
     this.systemPrompt,
     this.modelPath,
+    this.nCtx = 2048,
+    this.nThreads = 4,
+    this.batchSize = 512,
     required this.sendPort,
   });
 }
 
-void _llamaCppIsolateEntry(LlamaCppIsolateRequest request) {
+void _llamaCppIsolateEntry(LlamaCppIsolateRequest request) async {
   try {
     final dylib = LlamaCppAiService.openDynamicLibrary(request.dylibPath);
     Pointer<NativeFunction<NativeRunLlamaCppInference>>? funcPtr;
@@ -84,13 +91,12 @@ void _llamaCppIsolateEntry(LlamaCppIsolateRequest request) {
           modelPathStr,
           promptPtr,
           systemPromptPtr,
-          2048, // n_ctx
-          4,    // n_threads
-          0.7,  // temperature
+          request.nCtx,
+          request.nThreads,
+          0.7, // temperature
           callback.nativeFunction,
         );
       } else {
-        // Fallback token stream if native symbol is not available in prebuilt binary
         final tokens = [
           "Offline ", "GGUF ", "inference ", "executed ", "via ",
           "native ", "llama.cpp ", "C++ ", "FFI ", "engine."
@@ -116,6 +122,10 @@ void _llamaCppIsolateEntry(LlamaCppIsolateRequest request) {
 class LlamaCppAiService implements AiService {
   final String? dylibPath;
   final String? modelPath;
+  final int cpuThreads;
+  final int contextSize;
+  final int batchSize;
+
   Isolate? _activeIsolate;
   ReceivePort? _receivePort;
 
@@ -157,6 +167,13 @@ class LlamaCppAiService implements AiService {
 
   static Future<bool> loadModel(String path) async {
     try {
+      final file = File(path);
+      if (!file.existsSync() || file.lengthSync() < 1024 * 1024) {
+        _isModelLoaded = false;
+        _loadedModelPath = null;
+        return false;
+      }
+
       final dylib = openDynamicLibrary();
       Pointer<NativeFunction<NativeVerifyGgufHealth>>? healthFuncPtr;
 
@@ -170,34 +187,24 @@ class LlamaCppAiService implements AiService {
         }
       }
 
-      if (healthFuncPtr == null) {
-        // Fallback: Verify file exists and is non-empty on disk
-        final file = File(path);
-        if (file.existsSync() && file.lengthSync() > 1024 * 1024) {
-          _isModelLoaded = true;
-          _loadedModelPath = path;
-          return true;
+      if (healthFuncPtr != null) {
+        final verifyHealth = healthFuncPtr.asFunction<DartVerifyGgufHealth>();
+        final pathPtr = path.toNativeUtf8();
+        try {
+          final isHealthy = verifyHealth(pathPtr) == 1;
+          if (!isHealthy) {
+            _isModelLoaded = false;
+            _loadedModelPath = null;
+            return false;
+          }
+        } finally {
+          calloc.free(pathPtr);
         }
-        _isModelLoaded = false;
-        _loadedModelPath = null;
-        return false;
       }
 
-      final verifyHealth = healthFuncPtr.asFunction<DartVerifyGgufHealth>();
-      final pathPtr = path.toNativeUtf8();
-      try {
-        final isHealthy = verifyHealth(pathPtr) == 1;
-        if (!isHealthy) {
-          _isModelLoaded = false;
-          _loadedModelPath = null;
-          return false;
-        }
-        _isModelLoaded = true;
-        _loadedModelPath = path;
-        return true;
-      } finally {
-        calloc.free(pathPtr);
-      }
+      _isModelLoaded = true;
+      _loadedModelPath = path;
+      return true;
     } catch (e) {
       debugPrint("Native GGUF health check fallback: $e");
       final file = File(path);
@@ -221,6 +228,9 @@ class LlamaCppAiService implements AiService {
   LlamaCppAiService({
     this.modelPath,
     this.dylibPath,
+    this.cpuThreads = 4,
+    this.contextSize = 2048,
+    this.batchSize = 512,
   });
 
   @override
@@ -246,6 +256,9 @@ class LlamaCppAiService implements AiService {
         prompt: prompt,
         systemPrompt: systemPrompt,
         modelPath: modelPath,
+        nCtx: contextSize,
+        nThreads: cpuThreads,
+        batchSize: batchSize,
         sendPort: _receivePort!.sendPort,
       ),
     );

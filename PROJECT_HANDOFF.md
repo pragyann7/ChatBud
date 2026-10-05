@@ -20,7 +20,7 @@
   - `ConversationRepository`: Chat session lifecycle, pinning, renaming, cascade message deletion, Isar streams.
   - `MessageRepository`: Pair message saving, `updatedAt` touch timestamps, parent verification in transactions (`writeTxn`) to prevent orphan messages.
   - `BudRepository`: Stable identity seeding (IDs 1–4: *General*, *Coding*, *Study*, *Creative*), custom Bud CRUD.
-  - `SettingsRepository`: Single-instance app settings (`theme`, `selectedModel`, `serverIp`, `engineType`, `modelPath`) enforcing fixed **ID = 1** and atomic `writeTxn` updates.
+  - `SettingsRepository`: Single-instance app settings (`theme`, `selectedModel`, `serverIp`, `engineType`, `modelPath`, `cpuThreads`, `contextSize`, `batchSize`) enforcing fixed **ID = 1** and atomic `writeTxn` updates.
 - **Indexing & Paginated Queries**: Indexed `@Index()` on `Message.conversationId` and `Message.createdAt` with deterministic paginated history loading.
 - **AI Persona ("Bud") System**: Custom Bud management screen (`BudsScreen`), turn-by-turn persona switching via `BudSelectorChip` with a **"No Bud / Raw LLM"** clean-slate fallback, and auto-repair for deleted Bud references.
 
@@ -57,6 +57,15 @@
   - 1-tap **`[ ⚡ Load Model ]`** and **`[ Unload RAM ]`** controls to manage phone RAM/VRAM manually.
   - Auto-loads model before generation if not loaded.
 
+### ✅ **Phase 5: Thread Isolation, Memory Safeguards & Stress Testing**
+- **App Lifecycle Memory Safeguards**: `GenerationManager` listens to `WidgetsBindingObserver` (`didChangeAppLifecycleState`). When ChatBud is backgrounded (`AppLifecycleState.paused`), it automatically calls `LlamaCppAiService.unloadModel()` to release native C-heap RAM to the mobile operating system!
+- **Inference Parameter Tuning**: Added `cpuThreads` (default: 4 threads), `contextSize` (default: 2048 tokens), and `batchSize` (default: 512 tokens) to `AppSettings` and passed directly to C++ native `run_llama_cpp_inference()`.
+- **Automated Stress Test Suite (`test/stress_test.dart`)**:
+  - Verifies rapid chat switching during background streaming.
+  - Verifies multi-chat concurrent background jobs and isolated notifiers.
+  - Verifies rapid cancellation and state recovery.
+  - Verifies unread completion badge updates across multi-chat sessions.
+
 ---
 
 ## 🏗️ 3. Current Codebase Structure
@@ -66,7 +75,7 @@ lib/
 ├── database/
 │   └── database.dart           # Isar DB initialization, schema definitions & default seeding
 ├── models/
-│   ├── app_settings.dart       # Global settings model (Theme, Model selection, Server IP, EngineType, ModelPath)
+│   ├── app_settings.dart       # Global settings model (Theme, Selected Model, Server IP, EngineType, ModelPath, CPU Threads, ContextSize)
 │   ├── bud.dart                # AI Persona model
 │   ├── conversation.dart       # Chat session model
 │   ├── hugging_face_model.dart # Hugging Face Repo & GGUF file models
@@ -75,7 +84,7 @@ lib/
 │   ├── bud_repository.dart          # Persona CRUD & stable ID (1-4) seeding
 │   ├── conversation_repository.dart # Chat session CRUD & Isar streams
 │   ├── message_repository.dart      # Pair-saving, pagination & touch timestamps
-│   └── settings_repository.dart     # Atomic app settings (Fixed ID = 1, Server IP, EngineType, ModelPath)
+│   └── settings_repository.dart     # Atomic app settings (Fixed ID = 1, Server IP, EngineType, ModelPath, CPU Threads)
 ├── screens/
 │   ├── buds_screen.dart        # Custom Bud management UI
 │   ├── chat_screen.dart        # Main chat UI with paginated history, model bar, in-place retry & stream handling
@@ -100,22 +109,15 @@ native/
 test/
 ├── ffi_test.dart               # FFI unit & Isolate integration test suite
 ├── repository_test.dart        # Unit tests for Isar repositories & race condition safeguards
+├── stress_test.dart            # Phase 5 production stress & memory safeguard test suite
 └── widget_test.dart            # Widget rendering & Provider harness test
 ```
 
 ---
 
 ## 🧪 4. Test Suite Status
-All automated repository, widget, and FFI integration tests pass 100%:
+All automated repository, widget, FFI, and stress tests pass 100%:
 ```bash
 $ flutter test
-00:03 +15: All tests passed!
+00:03 +17: All tests passed!
 ```
-
----
-
-## 🔮 5. Planned Next Phase (Phase 5)
-
-- **Phase 5 — Isolates, C++ Tensor Linking & Memory Safeguards**:
-  - Link real `llama.cpp` C++ tensor matrix multiplication engine (`llama.h` / `llama.cpp`) into `native/llama_bridge.cpp`.
-  - Manage large GGUF models carefully, and handle device memory limits and out-of-memory risks.
