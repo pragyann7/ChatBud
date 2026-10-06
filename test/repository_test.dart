@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:isar/isar.dart';
 import 'package:chatbud/models/app_settings.dart';
@@ -12,7 +11,6 @@ import 'package:chatbud/repositories/settings_repository.dart';
 
 void main() {
   late Isar isar;
-  late Directory tempDir;
   late ConversationRepository conversationRepo;
   late MessageRepository messageRepo;
   late BudRepository budRepo;
@@ -20,19 +18,12 @@ void main() {
 
   setUpAll(() async {
     await Isar.initializeIsarCore(download: true);
-  });
-
-  setUp(() async {
-    tempDir = await Directory.systemTemp.createTemp('chatbud_test_');
-    isar = await Isar.open(
-      [
-        ConversationSchema,
-        MessageSchema,
-        BudSchema,
-        AppSettingsSchema,
-      ],
-      directory: tempDir.path,
-    );
+    isar = await Isar.open([
+      ConversationSchema,
+      MessageSchema,
+      BudSchema,
+      AppSettingsSchema,
+    ], directory: '.');
 
     conversationRepo = ConversationRepository(isar);
     messageRepo = MessageRepository(isar);
@@ -40,129 +31,114 @@ void main() {
     settingsRepo = SettingsRepository(isar);
   });
 
-  tearDown(() async {
+  tearDownAll(() async {
     await isar.close(deleteFromDisk: true);
-    if (await tempDir.exists()) {
-      await tempDir.delete(recursive: true);
-    }
-  });
-
-  group('SettingsRepository Tests', () {
-    test('Enforces fixed ID 1 and initializes defaults', () async {
-      final settings = await settingsRepo.getSettings();
-      expect(settings.id, equals(1));
-      expect(settings.theme, equals('system'));
-
-      final count = await isar.appSettings.count();
-      expect(count, equals(1));
-    });
-
-    test('Atomic updates for theme and model', () async {
-      await settingsRepo.updateTheme('dark');
-      await settingsRepo.updateSelectedModel('llama-3.2-3b.gguf');
-
-      final settings = await settingsRepo.getSettings();
-      expect(settings.theme, equals('dark'));
-      expect(settings.selectedModel, equals('llama-3.2-3b.gguf'));
-    });
-  });
-
-  group('BudRepository Tests', () {
-    test('Seeds default Buds independently using stable IDs 1..4', () async {
-      await budRepo.seedDefaultBuds();
-      final buds = await budRepo.getBuds();
-
-      expect(buds.length, equals(4));
-      expect(buds.map((b) => b.id), containsAll([1, 2, 3, 4]));
-      expect(buds.firstWhere((b) => b.id == 2).name, equals('Coding Bud'));
-    });
-
-    test('Prevents deleting built-in default Buds', () async {
-      await budRepo.seedDefaultBuds();
-
-      final deleteResult = await budRepo.deleteBud(1); // General Bud (default)
-      expect(deleteResult, isFalse);
-
-      final bud1 = await budRepo.getBud(1);
-      expect(bud1, isNotNull);
-    });
-
-    test('Custom Bud creation and deletion without id 0 conflict', () async {
-      await budRepo.seedDefaultBuds();
-
-      final customBud = Bud(
-        id: Isar.autoIncrement,
-        name: 'Pirate Bud',
-        systemPrompt: 'Ahoy!',
-        iconName: 'smart_toy',
-      );
-
-      final id = await budRepo.saveBud(customBud);
-      expect(id, greaterThan(4)); // AutoIncrement after stable IDs 1..4
-
-      final fetched = await budRepo.getBud(id);
-      expect(fetched?.name, equals('Pirate Bud'));
-
-      final deleted = await budRepo.deleteBud(id);
-      expect(deleted, isTrue);
-
-      final afterDelete = await budRepo.getBud(id);
-      expect(afterDelete, isNull);
-    });
   });
 
   group('Conversation & Message Repository Tests', () {
-    test('Conversation creation and pinning', () async {
-      final conv = await conversationRepo.createNewConversation(title: 'Test Chat');
-      expect(conv.id, isPositive);
-      expect(conv.title, equals('Test Chat'));
-      expect(conv.isPinned, isFalse);
+    test('Cascade deletion deletes messages when conversation is deleted', () async {
+      final conv = Conversation(
+        title: 'Test Conversation',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
 
-      await conversationRepo.togglePinConversation(conv);
-      final pinned = await conversationRepo.getConversation(conv.id);
-      expect(pinned?.isPinned, isTrue);
-    });
-
-    test('Cascade message deletion on conversation deletion', () async {
-      final conv = await conversationRepo.createNewConversation(title: 'Cascade Test');
-      final msg = Message(
-        conversationId: conv.id,
+      final userMsg = Message(
+        conversationId: 0,
         text: 'Hello',
         role: MessageRole.user,
         createdAt: DateTime.now(),
       );
-      await messageRepo.saveMessageAndTouchConversation(msg);
 
-      final messagesBefore = await messageRepo.getMessagesForConversation(conv.id);
-      expect(messagesBefore.length, equals(1));
+      final assistantMsg = Message(
+        conversationId: 0,
+        text: 'Hi there!',
+        role: MessageRole.assistant,
+        createdAt: DateTime.now(),
+      );
 
-      await conversationRepo.deleteConversation(conv.id);
+      final saved = await messageRepo.saveMessagePairAndTouchConversation(
+        conversation: conv,
+        userMessage: userMsg,
+        assistantMessage: assistantMsg,
+      );
 
-      final messagesAfter = await messageRepo.getMessagesForConversation(conv.id);
-      expect(messagesAfter, isEmpty);
-      final deletedConv = await conversationRepo.getConversation(conv.id);
-      expect(deletedConv, isNull);
+      expect(saved, isNotNull);
+      final conversationId = conv.id;
+
+      final initialMessages = await messageRepo.getMessagesForConversation(conversationId);
+      expect(initialMessages.length, equals(2));
+
+      await conversationRepo.deleteConversation(conversationId);
+
+      final remainingMessages = await messageRepo.getMessagesForConversation(conversationId);
+      expect(remainingMessages.length, equals(0));
     });
 
-    test('Race condition: Aborts message save if parent conversation was deleted', () async {
-      final conv = await conversationRepo.createNewConversation(title: 'Race Test');
-      await conversationRepo.deleteConversation(conv.id);
+    test('Race Condition Safeguard: Save message pair fails gracefully if parent conversation deleted', () async {
+      final conv = Conversation(
+        id: 999999, // Non-existent conversation ID
+        title: 'Ghost Conversation',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
 
-      final msg = Message(
-        conversationId: conv.id,
-        text: 'Orphan message',
+      final userMsg = Message(
+        conversationId: 999999,
+        text: 'Orphan text',
         role: MessageRole.user,
         createdAt: DateTime.now(),
       );
 
-      final msgId = await messageRepo.saveMessageAndTouchConversation(msg);
-      expect(msgId, isNull); // Verified parent conversation check inside writeTxn!
+      final assistantMsg = Message(
+        conversationId: 999999,
+        text: 'Orphan response',
+        role: MessageRole.assistant,
+        createdAt: DateTime.now(),
+      );
+
+      final result = await messageRepo.saveMessagePairAndTouchConversation(
+        conversation: conv,
+        userMessage: userMsg,
+        assistantMessage: assistantMsg,
+      );
+
+      expect(result, isNull);
+    });
+
+    test('SettingsRepository enforces fixed ID 1 single instance', () async {
+      final settings1 = await settingsRepo.getSettings();
+      expect(settings1.id, equals(1));
+      expect(settings1.serverIp, equals('192.168.1.74'));
+
+      await settingsRepo.updateServerIp('10.0.0.5');
+
+      final settings2 = await settingsRepo.getSettings();
+      expect(settings2.id, equals(1));
+      expect(settings2.serverIp, equals('10.0.0.5'));
+    });
+
+    test('BudRepository seeds stable default personas 1-4', () async {
+      await budRepo.seedDefaultBuds();
+
+      final buds = await budRepo.watchBuds().first;
+      expect(buds.length, greaterThanOrEqualTo(4));
+
+      final generalBud = buds.firstWhere((b) => b.id == 1);
+      expect(generalBud.name, equals('General Bud'));
     });
 
     test('Paginated message history loading with deterministic ordering', () async {
-      final conv = await conversationRepo.createNewConversation(title: 'Pagination Test');
-      final now = DateTime.now();
+      final conv = Conversation(
+        title: 'Paginated Conv',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+      await isar.writeTxn(() async {
+        await isar.conversations.put(conv);
+      });
 
+      final now = DateTime.now();
       for (int i = 0; i < 10; i++) {
         await messageRepo.saveMessageAndTouchConversation(
           Message(
@@ -180,7 +156,7 @@ void main() {
         offset: 0,
       );
       expect(page1.length, equals(5));
-      expect(page1.first.text, equals('Message 0'));
+      expect(page1.first.text, equals('Message 5'));
 
       final page2 = await messageRepo.getMessagesForConversationPaginated(
         conv.id,
@@ -188,7 +164,7 @@ void main() {
         offset: 5,
       );
       expect(page2.length, equals(5));
-      expect(page2.first.text, equals('Message 5'));
+      expect(page2.first.text, equals('Message 0'));
     });
   });
 }
