@@ -18,9 +18,7 @@ class MessageRepository {
       final msgId = await isar.messages.put(message);
       message.id = msgId;
 
-      final updatedConv = conv.copyWith(
-        updatedAt: DateTime.now(),
-      );
+      final updatedConv = conv.copyWith(updatedAt: DateTime.now());
       await isar.conversations.put(updatedConv);
       return msgId;
     });
@@ -62,8 +60,9 @@ class MessageRepository {
       );
 
       persistedUserMessage.id = await isar.messages.put(persistedUserMessage);
-      persistedAssistantMessage.id =
-          await isar.messages.put(persistedAssistantMessage);
+      persistedAssistantMessage.id = await isar.messages.put(
+        persistedAssistantMessage,
+      );
       return [persistedUserMessage, persistedAssistantMessage];
     });
   }
@@ -92,15 +91,17 @@ class MessageRepository {
     final messages = await isar.messages
         .filter()
         .conversationIdEqualTo(conversationId)
-        .sortByCreatedAt()
+        .sortByCreatedAtDesc()
         .offset(offset)
         .limit(limit)
         .findAll();
-
-    // Deterministic tie-breaking sort by ID
+    // Isar's generated ID sort is not a stored property in this schema and
+    // fails at runtime with "Unknown property id". Sort the selected page in
+    // memory for stable display order, then return it oldest-first for the
+    // reverse-scrolling chat list.
     messages.sort((a, b) {
-      final cmp = a.createdAt.compareTo(b.createdAt);
-      if (cmp != 0) return cmp;
+      final dateComparison = a.createdAt.compareTo(b.createdAt);
+      if (dateComparison != 0) return dateComparison;
       return a.id.compareTo(b.id);
     });
     return messages;

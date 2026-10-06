@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+
 import 'package:flutter/widgets.dart';
 import 'package:chatbud/models/message.dart';
 import 'package:chatbud/repositories/message_repository.dart';
@@ -32,17 +32,29 @@ class ActiveGenerationJob {
   });
 }
 
-class GenerationManager extends ChangeNotifier {
+class GenerationManager extends ChangeNotifier with WidgetsBindingObserver {
   final MessageRepository messageRepository;
   final SettingsRepository settingsRepository;
 
   final Map<int, ActiveGenerationJob> _activeJobs = {};
+  final Set<int> _startingConversationIds = {};
   final Set<int> _unreadCompletedIds = {};
 
   GenerationManager({
     required this.messageRepository,
     required this.settingsRepository,
-  });
+  }) {
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      // App backgrounded: Automatically unload GGUF model from RAM to prevent OS OOM kills
+      debugPrint("App paused: Releasing C-heap native RAM");
+      unawaited(LlamaCppAiService.unloadModel());
+    }
+  }
 
   bool isGenerating(int conversationId) {
     return _activeJobs.containsKey(conversationId);
@@ -65,7 +77,10 @@ class GenerationManager extends ChangeNotifier {
     return _activeJobs[conversationId];
   }
 
-  ValueNotifier<String>? getNotifier(int conversationId, int assistantMessageId) {
+  ValueNotifier<String>? getNotifier(
+    int conversationId,
+    int assistantMessageId,
+  ) {
     final job = _activeJobs[conversationId];
     if (job != null && job.assistantMessageId == assistantMessageId) {
       return job.notifier;
@@ -84,35 +99,66 @@ class GenerationManager extends ChangeNotifier {
   }) async {
     _unreadCompletedIds.remove(conversationId);
 
-    if (_activeJobs.containsKey(conversationId)) {
+    if (_activeJobs.containsKey(conversationId) ||
+        !_startingConversationIds.add(conversationId)) {
       return;
     }
+    try {
+      final settings = await settingsRepository.getSettings();
+      final AiService aiService;
 
-    final settings = await settingsRepository.getSettings();
-    final AiService aiService;
+      if (settings.engineType == 'llama_cpp') {
+        aiService = LlamaCppAiService(
+          modelPath: settings.modelPath,
+          cpuThreads: settings.cpuThreads,
+          contextSize: settings.contextSize,
+          batchSize: settings.batchSize,
+        );
+      } else {
+        aiService = MacAiService(
+          serverIp: settings.serverIp ?? '192.168.1.74',
+          modelName: settings.selectedModel ?? 'qwen3:0.6b',
+        );
+      }
 
-    if (settings.engineType == 'llama_cpp') {
-      aiService = LlamaCppAiService(modelPath: settings.modelPath);
-    } else {
-      final serverIp = settings.serverIp ?? '192.168.1.74';
-      aiService = MacAiService(serverIp: serverIp);
+      final job = ActiveGenerationJob(
+        conversationId: conversationId,
+        assistantMessageId: assistantMessageId,
+        prompt: prompt,
+        systemPrompt: systemPrompt,
+        conversationHistory: List.unmodifiable(conversationHistory),
+        createdAt: createdAt,
+        budId: budId,
+        aiService: aiService,
+      );
+
+      _activeJobs[conversationId] = job;
+      notifyListeners();
+      unawaited(_runGenerationJob(job));
+    } catch (error, stackTrace) {
+      debugPrint(
+        'Could not start generation for $conversationId: $error\n$stackTrace',
+      );
+      try {
+        await messageRepository.saveMessageAndTouchConversation(
+          Message(
+            id: assistantMessageId,
+            conversationId: conversationId,
+            text: '',
+            role: MessageRole.assistant,
+            status: MessageStatus.failed,
+            createdAt: createdAt,
+            budId: budId,
+          ),
+        );
+      } catch (persistError) {
+        debugPrint('Could not persist startup failure: $persistError');
+      }
+      _unreadCompletedIds.add(conversationId);
+      notifyListeners();
+    } finally {
+      _startingConversationIds.remove(conversationId);
     }
-
-    final job = ActiveGenerationJob(
-      conversationId: conversationId,
-      assistantMessageId: assistantMessageId,
-      prompt: prompt,
-      systemPrompt: systemPrompt,
-      conversationHistory: conversationHistory,
-      createdAt: createdAt,
-      budId: budId,
-      aiService: aiService,
-    );
-
-    _activeJobs[conversationId] = job;
-    notifyListeners();
-
-    _runGenerationJob(job);
   }
 
   Future<void> _runGenerationJob(ActiveGenerationJob job) async {
@@ -135,10 +181,14 @@ class GenerationManager extends ChangeNotifier {
       job.notifier.value = job.accumulatedText.toString();
       finalStatus = MessageStatus.completed;
     } on AiServiceException catch (e) {
-      debugPrint("Background AI Service Error ($e) in conv ${job.conversationId}");
+      debugPrint(
+        "Background AI Service Error ($e) in conv ${job.conversationId}",
+      );
       finalStatus = MessageStatus.failed;
     } catch (e, stackTrace) {
-      debugPrint("Background Stream Error ($e) in conv ${job.conversationId}\n$stackTrace");
+      debugPrint(
+        "Background Stream Error ($e) in conv ${job.conversationId}\n$stackTrace",
+      );
       finalStatus = MessageStatus.failed;
     } finally {
       final finalText = job.accumulatedText.toString();
@@ -151,9 +201,7 @@ class GenerationManager extends ChangeNotifier {
       _unreadCompletedIds.add(job.conversationId);
       notifyListeners();
 
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        job.notifier.dispose();
-      });
+      job.notifier.dispose();
     }
   }
 
@@ -181,12 +229,15 @@ class GenerationManager extends ChangeNotifier {
       );
       await messageRepository.saveMessageAndTouchConversation(msg);
     } catch (e) {
-      debugPrint("Could not persist background message ${job.assistantMessageId}: $e");
+      debugPrint(
+        "Could not persist background message ${job.assistantMessageId}: $e",
+      );
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     for (final job in _activeJobs.values) {
       job.aiService.stopGeneration();
       job.notifier.dispose();
