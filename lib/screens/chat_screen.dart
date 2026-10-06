@@ -27,7 +27,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   static const int _messagePageSize = 50;
 
   late ConversationRepository _conversationRepository;
@@ -52,7 +52,32 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_handleScroll);
+    _textController.addListener(_handleTextChange);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      debugPrint("ChatScreen: App resumed, auto-preloading model if needed");
+      _autoPreloadModelIfNeeded();
+    }
+  }
+
+  void _handleTextChange() {
+    LlamaCppAiService.touchActivity();
+  }
+
+  @override
+  void didUpdateWidget(ChatScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.conversation?.id != widget.conversation?.id) {
+      LlamaCppAiService.touchActivity();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _autoPreloadModelIfNeeded();
+      });
+    }
   }
 
   @override
@@ -130,7 +155,38 @@ class _ChatScreenState extends State<ChatScreen> {
           _activeBud = loadedBud;
           _isLoading = false;
         });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _autoPreloadModelIfNeeded();
+        });
       }
+    }
+  }
+
+  Future<void> _autoPreloadModelIfNeeded() async {
+    if (!mounted || !Platform.isAndroid) return;
+    try {
+      final settings = await _settingsRepository.getSettings();
+      if (settings.engineType != 'llama_cpp') return;
+
+      final path = settings.modelPath;
+      if (path == null || path.trim().isEmpty) return;
+
+      final file = File(path);
+      if (!await file.exists() || await file.length() < 4) return;
+
+      if (LlamaCppAiService.isModelLoaded || LlamaCppAiService.isModelLoading) {
+        return;
+      }
+
+      debugPrint("PocketPal pattern: Background pre-warming model: ${file.path}");
+      await LlamaCppAiService.loadModel(
+        file.path,
+        cpuThreads: settings.cpuThreads,
+        contextSize: settings.contextSize,
+        batchSize: settings.batchSize,
+      );
+    } catch (error) {
+      debugPrint("Auto-preload model notice (non-fatal): $error");
     }
   }
 
@@ -528,7 +584,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scrollController.removeListener(_handleScroll);
+    _textController.removeListener(_handleTextChange);
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -548,131 +606,163 @@ class _ChatScreenState extends State<ChatScreen> {
 
     _checkAndSyncCompletedBackgroundJobs(genManager);
 
-    return Column(
-      children: [
-        // Bud Selector Header Bar
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          alignment: Alignment.centerLeft,
-          color: Theme.of(context).colorScheme.surface,
-          child: Row(
-            children: [
-              BudSelectorChip(
-                activeBud: _activeBud,
-                onBudSelected: _onBudChanged,
-              ),
-              const Spacer(),
-            ],
-          ),
-        ),
-        // llama.cpp On-Device Model Status Bar
-        StreamBuilder<AppSettings?>(
-          stream: _settingsRepository.watchSettings(),
-          builder: (context, snapshot) {
-            final settings = snapshot.data;
-            if (settings?.engineType != 'llama_cpp') {
-              return const SizedBox.shrink();
-            }
+    return StreamBuilder<AppSettings?>(
+      stream: _settingsRepository.watchSettings(),
+      builder: (context, snapshot) {
+        final settings = snapshot.data;
+        final isLlamaCpp = settings?.engineType == 'llama_cpp';
 
-            final modelPath = settings?.modelPath;
+        return ListenableBuilder(
+          listenable: Listenable.merge([
+            LlamaCppAiService.isModelLoadingNotifier,
+            LlamaCppAiService.isModelLoadedNotifier,
+          ]),
+          builder: (context, _) {
             final isLoaded = LlamaCppAiService.isModelLoaded;
+            final isCurrentlyLoading =
+                _isModelLoading || LlamaCppAiService.isModelLoading;
+            final modelPath = settings?.modelPath;
             final fileName = modelPath != null
                 ? modelPath.split('/').last
                 : null;
 
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              color: Theme.of(context).colorScheme.surfaceContainerHighest
-                  .withOpacity(0.5),
-              child: Row(
-                children: [
-                  Icon(
-                    isLoaded ? Icons.bolt_rounded : Icons.memory_rounded,
-                    size: 16,
-                    color: isLoaded
-                        ? Colors.green
-                        : Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      isLoaded
-                          ? "Loaded: ${fileName ?? 'Model'} (RAM Active)"
-                          : (fileName != null
-                                ? "Model Ready: $fileName"
-                                : "No Model Loaded"),
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: isLoaded
-                            ? Colors.green
-                            : Theme.of(context).colorScheme.primary,
+            final bool isInputEnabled;
+            final String hintText;
+
+            if (isLlamaCpp) {
+              if (isCurrentlyLoading) {
+                isInputEnabled = false;
+                hintText = "Warming up model...";
+              } else if (!isLoaded) {
+                isInputEnabled = false;
+                hintText = "Model not loaded";
+              } else {
+                isInputEnabled = true;
+                hintText = "Type a message…";
+              }
+            } else {
+              isInputEnabled = true;
+              hintText = "Type a message…";
+            }
+
+            return Column(
+              children: [
+                // Bud Selector Header Bar
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  alignment: Alignment.centerLeft,
+                  color: Theme.of(context).colorScheme.surface,
+                  child: Row(
+                    children: [
+                      BudSelectorChip(
+                        activeBud: _activeBud,
+                        onBudSelected: _onBudChanged,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      const Spacer(),
+                    ],
+                  ),
+                ),
+                // llama.cpp On-Device Model Status Bar
+                if (isLlamaCpp)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest
+                        .withOpacity(0.5),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isLoaded ? Icons.bolt_rounded : Icons.memory_rounded,
+                          size: 16,
+                          color: isLoaded
+                              ? Colors.green
+                              : Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            isCurrentlyLoading
+                                ? "Warming up: ${fileName ?? 'Model'}..."
+                                : isLoaded
+                                    ? "Loaded: ${fileName ?? 'Model'} (RAM Active)"
+                                    : (fileName != null
+                                          ? "Model Ready: $fileName"
+                                          : "No Model Loaded"),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: isLoaded
+                                  ? Colors.green
+                                  : Theme.of(context).colorScheme.primary,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (isCurrentlyLoading)
+                          const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        else if (isLoaded)
+                          TextButton(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: _unloadLocalGgufModel,
+                            child: const Text(
+                              "Unload RAM",
+                              style: TextStyle(fontSize: 11),
+                            ),
+                          )
+                        else if (fileName != null)
+                          FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: () => _loadLocalGgufModel(modelPath!),
+                            icon: const Icon(Icons.bolt_rounded, size: 14),
+                            label: const Text(
+                              "Load Model",
+                              style: TextStyle(fontSize: 11),
+                            ),
+                          )
+                        else
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: _showModelRequiredDialog,
+                            icon: const Icon(
+                              Icons.cloud_download_rounded,
+                              size: 14,
+                            ),
+                            label: const Text(
+                              "Get Model",
+                              style: TextStyle(fontSize: 11),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-                  if (_isModelLoading)
-                    const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  else if (isLoaded)
-                    TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      onPressed: _unloadLocalGgufModel,
-                      child: const Text(
-                        "Unload RAM",
-                        style: TextStyle(fontSize: 11),
-                      ),
-                    )
-                  else if (fileName != null)
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      onPressed: () => _loadLocalGgufModel(modelPath!),
-                      icon: const Icon(Icons.bolt_rounded, size: 14),
-                      label: const Text(
-                        "Load Model",
-                        style: TextStyle(fontSize: 11),
-                      ),
-                    )
-                  else
-                    TextButton.icon(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      onPressed: _showModelRequiredDialog,
-                      icon: const Icon(Icons.cloud_download_rounded, size: 14),
-                      label: const Text(
-                        "Model Hub",
-                        style: TextStyle(fontSize: 11),
-                      ),
-                    ),
-                ],
-              ),
-            );
-          },
-        ),
         const Divider(height: 1),
         Expanded(
           child: Stack(
@@ -775,11 +865,17 @@ class _ChatScreenState extends State<ChatScreen> {
         ChatInput(
           controller: _textController,
           isGenerating: isInputGenerating,
+          enabled: isInputEnabled,
+          hintText: hintText,
           onSend: _sendMessage,
           onStop: _stopGeneration,
           onAddAttachment: () {},
         ),
       ],
+    );
+          },
+        );
+      },
     );
   }
 }

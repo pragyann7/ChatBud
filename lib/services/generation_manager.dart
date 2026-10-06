@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:chatbud/models/message.dart';
@@ -49,10 +50,39 @@ class GenerationManager extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
-      // App backgrounded: Automatically unload GGUF model from RAM to prevent OS OOM kills
-      debugPrint("App paused: Releasing C-heap native RAM");
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      // App backgrounded, hidden, or closed: Automatically unload GGUF model from RAM to prevent OS OOM kills
+      debugPrint("App $state: Releasing C-heap native RAM to prevent OS OOM kills");
       unawaited(LlamaCppAiService.unloadModel());
+    } else if (state == AppLifecycleState.resumed) {
+      // App resumed / brought to foreground: Automatically reload local model (PocketPal pattern)
+      debugPrint("App resumed: Auto-reloading local model into RAM (PocketPal pattern)");
+      unawaited(_preloadModelOnResume());
+    }
+  }
+
+  Future<void> _preloadModelOnResume() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final settings = await settingsRepository.getSettings();
+      if (settings.engineType != 'llama_cpp') return;
+      final path = settings.modelPath;
+      if (path == null || path.trim().isEmpty) return;
+      final file = File(path);
+      if (!await file.exists() || await file.length() < 4) return;
+      if (LlamaCppAiService.isModelLoaded || LlamaCppAiService.isModelLoading) {
+        return;
+      }
+      await LlamaCppAiService.loadModel(
+        file.path,
+        cpuThreads: settings.cpuThreads,
+        contextSize: settings.contextSize,
+        batchSize: settings.batchSize,
+      );
+    } catch (e) {
+      debugPrint("Auto-preload on resume notice (non-fatal): $e");
     }
   }
 
