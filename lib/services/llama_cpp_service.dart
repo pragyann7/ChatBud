@@ -1,237 +1,132 @@
 import 'dart:async';
-import 'dart:ffi';
 import 'dart:io';
-import 'dart:isolate';
-import 'package:ffi/ffi.dart';
-import 'package:flutter/foundation.dart';
-import 'package:llama_cpp_dart/llama_cpp_dart.dart' hide Message;
+
 import 'package:chatbud/models/message.dart';
 import 'package:chatbud/services/ai_service.dart';
+import 'package:flutter/foundation.dart';
+import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 
-// Native C signatures for fallback bridge
-typedef NativeRunLlamaCppInference = Int32 Function(
-  Pointer<Utf8> modelPath,
-  Pointer<Utf8> prompt,
-  Pointer<Utf8> systemPrompt,
-  Int32 nCtx,
-  Int32 nThreads,
-  Float temperature,
-  Pointer<NativeFunction<NativeTokenCallback>> callback,
-);
-typedef NativeTokenCallback = Void Function(Pointer<Utf8> token, Int32 isDone);
-typedef NativeVerifyGgufHealth = Int32 Function(Pointer<Utf8> modelPath);
-
-// Dart signatures
-typedef DartRunLlamaCppInference = int Function(
-  Pointer<Utf8> modelPath,
-  Pointer<Utf8> prompt,
-  Pointer<Utf8> systemPrompt,
-  int nCtx,
-  int nThreads,
-  double temperature,
-  Pointer<NativeFunction<NativeTokenCallback>> callback,
-);
-typedef DartVerifyGgufHealth = int Function(Pointer<Utf8> modelPath);
-
-class LlamaCppIsolateRequest {
-  final String? dylibPath;
-  final String prompt;
-  final String? systemPrompt;
-  final String? modelPath;
-  final int nCtx;
-  final int nThreads;
-  final int batchSize;
-  final SendPort sendPort;
-
-  LlamaCppIsolateRequest({
-    this.dylibPath,
-    required this.prompt,
-    this.systemPrompt,
-    this.modelPath,
-    this.nCtx = 2048,
-    this.nThreads = 4,
-    this.batchSize = 512,
-    required this.sendPort,
-  });
-}
-
-void _llamaCppIsolateEntry(LlamaCppIsolateRequest request) async {
-  try {
-    final dylib = LlamaCppAiService.openDynamicLibrary(request.dylibPath);
-    Pointer<NativeFunction<NativeRunLlamaCppInference>>? funcPtr;
-
-    try {
-      funcPtr = dylib.lookup<NativeFunction<NativeRunLlamaCppInference>>('run_llama_cpp_inference_cpp');
-    } catch (_) {
-      try {
-        funcPtr = dylib.lookup<NativeFunction<NativeRunLlamaCppInference>>('run_llama_cpp_inference');
-      } catch (_) {
-        funcPtr = null;
-      }
-    }
-
-    final callback = NativeCallable<NativeTokenCallback>.listener(
-      (Pointer<Utf8> tokenPtr, int isDone) {
-        final token = tokenPtr.toDartString();
-        request.sendPort.send(token);
-        if (isDone == 1) {
-          request.sendPort.send(null); // EOF signal
-        }
-      },
-    );
-
-    final modelPathStr = (request.modelPath ?? '').toNativeUtf8();
-    final promptPtr = request.prompt.toNativeUtf8();
-    final systemPromptPtr = (request.systemPrompt ?? '').toNativeUtf8();
-
-    try {
-      if (funcPtr != null) {
-        final runInference = funcPtr.asFunction<DartRunLlamaCppInference>();
-        runInference(
-          modelPathStr,
-          promptPtr,
-          systemPromptPtr,
-          request.nCtx,
-          request.nThreads,
-          0.7, // temperature
-          callback.nativeFunction,
-        );
-      } else {
-        final tokens = [
-          "Offline ", "GGUF ", "inference ", "executed ", "via ",
-          "native ", "llama.cpp ", "C++ ", "FFI ", "engine."
-        ];
-        for (int i = 0; i < tokens.length; i++) {
-          final tokenPtr = tokens[i].toNativeUtf8();
-          request.sendPort.send(tokens[i]);
-          calloc.free(tokenPtr);
-        }
-        request.sendPort.send(null); // EOF
-      }
-    } finally {
-      calloc.free(modelPathStr);
-      calloc.free(promptPtr);
-      calloc.free(systemPromptPtr);
-    }
-  } catch (e, stackTrace) {
-    debugPrint("Native Llama.cpp Isolate Exception: $e\n$stackTrace");
-    request.sendPort.send(null); // EOF signal on error
-  }
-}
-
+/// Runs one local model at a time and owns its native runtime for the process.
+///
+/// llama_cpp_dart 0.9 packages Android's llama.cpp libraries as native assets;
+/// Android must use the packaged default library name (`libllama.so`) instead
+/// of trying to open the old, unbundled `libmtmd.so` name directly.
 class LlamaCppAiService implements AiService {
-  final String? dylibPath;
   final String? modelPath;
   final int cpuThreads;
   final int contextSize;
   final int batchSize;
 
-  Isolate? _activeIsolate;
-  ReceivePort? _receivePort;
-
-  static bool _isModelLoaded = false;
+  static LlamaEngine? _engine;
   static String? _loadedModelPath;
+  static Future<void>? _loading;
+  static StreamController<String>? _activeOutput;
+  static StreamSubscription<GenerationEvent>? _activeGeneration;
 
-  static bool get isModelLoaded => _isModelLoaded;
+  static bool get isModelLoaded => _engine != null;
   static String? get loadedModelPath => _loadedModelPath;
-
-  static DynamicLibrary openDynamicLibrary([String? customPath]) {
-    if (customPath != null && customPath.isNotEmpty) {
-      final file = File(customPath);
-      if (file.existsSync()) {
-        return DynamicLibrary.open(file.absolute.path);
-      }
-    }
-
-    if (Platform.isAndroid) {
-      try {
-        return DynamicLibrary.open('libsimple_bridge.so');
-      } catch (_) {
-        return DynamicLibrary.process();
-      }
-    } else if (Platform.isIOS) {
-      return DynamicLibrary.process();
-    } else if (Platform.isMacOS) {
-      final localDylib = File('native/libsimple_bridge.dylib');
-      if (localDylib.existsSync()) {
-        return DynamicLibrary.open(localDylib.absolute.path);
-      }
-      return DynamicLibrary.open('libsimple_bridge.dylib');
-    } else if (Platform.isWindows) {
-      return DynamicLibrary.open('simple_bridge.dll');
-    } else if (Platform.isLinux) {
-      return DynamicLibrary.open('libsimple_bridge.so');
-    }
-    return DynamicLibrary.process();
-  }
-
-  static Future<bool> loadModel(String path) async {
-    try {
-      final file = File(path);
-      if (!file.existsSync() || file.lengthSync() < 1024 * 1024) {
-        _isModelLoaded = false;
-        _loadedModelPath = null;
-        return false;
-      }
-
-      final dylib = openDynamicLibrary();
-      Pointer<NativeFunction<NativeVerifyGgufHealth>>? healthFuncPtr;
-
-      try {
-        healthFuncPtr = dylib.lookup<NativeFunction<NativeVerifyGgufHealth>>('verify_gguf_model_health_cpp');
-      } catch (_) {
-        try {
-          healthFuncPtr = dylib.lookup<NativeFunction<NativeVerifyGgufHealth>>('verify_gguf_model_health');
-        } catch (_) {
-          healthFuncPtr = null;
-        }
-      }
-
-      if (healthFuncPtr != null) {
-        final verifyHealth = healthFuncPtr.asFunction<DartVerifyGgufHealth>();
-        final pathPtr = path.toNativeUtf8();
-        try {
-          final isHealthy = verifyHealth(pathPtr) == 1;
-          if (!isHealthy) {
-            _isModelLoaded = false;
-            _loadedModelPath = null;
-            return false;
-          }
-        } finally {
-          calloc.free(pathPtr);
-        }
-      }
-
-      _isModelLoaded = true;
-      _loadedModelPath = path;
-      return true;
-    } catch (e) {
-      debugPrint("Native GGUF health check fallback: $e");
-      final file = File(path);
-      if (file.existsSync() && file.lengthSync() > 1024 * 1024) {
-        _isModelLoaded = true;
-        _loadedModelPath = path;
-        return true;
-      }
-      _isModelLoaded = false;
-      _loadedModelPath = null;
-      return false;
-    }
-  }
-
-  static Future<void> unloadModel() async {
-    await Future.delayed(const Duration(milliseconds: 100));
-    _isModelLoaded = false;
-    _loadedModelPath = null;
-  }
 
   LlamaCppAiService({
     this.modelPath,
-    this.dylibPath,
     this.cpuThreads = 4,
     this.contextSize = 2048,
     this.batchSize = 512,
   });
+
+  static Future<void> loadModel(
+    String path, {
+    int cpuThreads = 4,
+    int contextSize = 2048,
+    int batchSize = 512,
+  }) async {
+    if (!Platform.isAndroid) {
+      throw AiServiceException(
+        'The packaged local model runtime is currently available on Android only.',
+      );
+    }
+
+    final normalizedPath = File(path).absolute.path;
+    if (_activeOutput != null) {
+      throw AiServiceException(
+        'Stop the current response before changing models.',
+      );
+    }
+    if (_engine != null && _loadedModelPath == normalizedPath) return;
+    if (_loading != null) {
+      await _loading;
+      if (_engine != null && _loadedModelPath == normalizedPath) return;
+    }
+
+    final completer = Completer<void>();
+    _loading = completer.future;
+    try {
+      await _disposeRuntime();
+      final modelFile = File(normalizedPath);
+      if (!await modelFile.exists() || await modelFile.length() < 4) {
+        throw AiServiceException(
+          'The selected model file is missing or empty.',
+        );
+      }
+
+      // On Android the package's native-assets hook puts the CPU llama.cpp
+      // runtime in the APK. Passing libmtmd.so here bypassed that packaging and
+      // failed because that standalone library was never shipped by 0.2.x.
+      final engine = await LlamaEngine.spawn(
+        modelParams: ModelParams(path: normalizedPath),
+        contextParams:
+            ContextParams.mobile(
+              nCtx: contextSize.clamp(256, 131072),
+              nBatch: batchSize.clamp(32, 4096),
+              nUbatch: batchSize.clamp(32, 4096),
+            ).copyWith(
+              nThreads: cpuThreads.clamp(1, 64),
+              nThreadsBatch: cpuThreads.clamp(1, 64),
+            ),
+      ).timeout(const Duration(minutes: 3));
+
+      _engine = engine;
+      _loadedModelPath = normalizedPath;
+    } catch (error) {
+      _loadedModelPath = null;
+      if (error is AiServiceException) rethrow;
+      throw AiServiceException('Could not load the local model: $error');
+    } finally {
+      _loading = null;
+      if (!completer.isCompleted) completer.complete();
+    }
+  }
+
+  static Future<void> _disposeRuntime() async {
+    final engine = _engine;
+    _engine = null;
+    _loadedModelPath = null;
+    if (engine == null) return;
+    try {
+      await engine.dispose();
+    } catch (error) {
+      debugPrint('Error disposing llama.cpp runtime: $error');
+    }
+  }
+
+  static Future<void> unloadModel() async {
+    await stopActiveGeneration();
+    await _disposeRuntime();
+  }
+
+  static Future<void> stopActiveGeneration() async {
+    final generation = _activeGeneration;
+    _activeGeneration = null;
+    if (generation != null) {
+      try {
+        await generation.cancel();
+      } catch (error) {
+        debugPrint('Error stopping llama.cpp generation: $error');
+      }
+    }
+    final output = _activeOutput;
+    if (output != null && !output.isClosed) await output.close();
+    _activeOutput = null;
+  }
 
   @override
   Stream<String> generateResponse({
@@ -239,56 +134,92 @@ class LlamaCppAiService implements AiService {
     String? systemPrompt,
     List<Message>? conversationHistory,
   }) async* {
-    if (!_isModelLoaded && modelPath != null && modelPath!.isNotEmpty) {
-      final isHealthy = await loadModel(modelPath!);
-      if (!isHealthy) {
-        throw AiServiceException('GGUF Model Verification Failed: File is corrupt or unreadable.');
-      }
+    final path = modelPath;
+    if (path == null || path.trim().isEmpty) {
+      throw AiServiceException(
+        'Choose a GGUF model before starting local chat.',
+      );
+    }
+    if (_engine == null || _loadedModelPath != File(path).absolute.path) {
+      await loadModel(
+        path,
+        cpuThreads: cpuThreads,
+        contextSize: contextSize,
+        batchSize: batchSize,
+      );
+    }
+    if (_activeOutput != null) {
+      throw AiServiceException(
+        'The on-device engine is busy with another conversation. Try again when it finishes.',
+      );
     }
 
-    _receivePort = ReceivePort();
-    final controller = StreamController<String>();
+    final output = StreamController<String>();
+    _activeOutput = output;
+    EngineChat? chat;
+    try {
+      chat = await _engine!.createChat();
+      if (systemPrompt != null && systemPrompt.trim().isNotEmpty) {
+        chat.addSystem(systemPrompt.trim());
+      }
 
-    _activeIsolate = await Isolate.spawn(
-      _llamaCppIsolateEntry,
-      LlamaCppIsolateRequest(
-        dylibPath: dylibPath,
-        prompt: prompt,
-        systemPrompt: systemPrompt,
-        modelPath: modelPath,
-        nCtx: contextSize,
-        nThreads: cpuThreads,
-        batchSize: batchSize,
-        sendPort: _receivePort!.sendPort,
-      ),
-    );
-
-    final completer = Completer<void>();
-
-    _receivePort!.listen((message) {
-      if (message == null) {
-        if (!controller.isClosed) {
-          controller.close();
-        }
-        if (!completer.isCompleted) {
-          completer.complete();
-        }
-      } else if (message is String) {
-        if (!controller.isClosed) {
-          controller.add(message);
+      final history = (conversationHistory ?? const <Message>[]).where(
+        (message) =>
+            message.text.isNotEmpty &&
+            message.status != MessageStatus.failed &&
+            message.status != MessageStatus.pending,
+      );
+      var includesCurrentPrompt = false;
+      for (final message in history) {
+        if (message.isUser) {
+          chat.addUser(message.text);
+          if (message.text == prompt) includesCurrentPrompt = true;
+        } else {
+          chat.addAssistant(message.text);
         }
       }
-    });
+      if (!includesCurrentPrompt) chat.addUser(prompt);
 
-    yield* controller.stream;
-    await completer.future;
+      _activeGeneration = chat
+          .generate(
+            sampler: const SamplerParams(temperature: 0.7, topK: 40, topP: 0.9),
+            maxTokens: 1024,
+          )
+          .listen(
+            (event) {
+              if (event case TokenEvent(:final text) when text.isNotEmpty) {
+                if (!output.isClosed) output.add(text);
+              } else if (event case DoneEvent(:final trailingText)
+                  when trailingText.isNotEmpty) {
+                if (!output.isClosed) output.add(trailingText);
+              }
+            },
+            onError: (Object error, StackTrace stack) {
+              if (!output.isClosed) {
+                output.addError(
+                  AiServiceException('Local inference failed: $error'),
+                  stack,
+                );
+                output.close();
+              }
+            },
+            onDone: () {
+              if (!output.isClosed) output.close();
+            },
+          );
+      yield* output.stream;
+    } finally {
+      final generation = _activeGeneration;
+      _activeGeneration = null;
+      if (generation != null) await generation.cancel();
+      await chat?.dispose();
+      if (!output.isClosed) await output.close();
+      if (identical(_activeOutput, output)) _activeOutput = null;
+    }
   }
 
   @override
   void stopGeneration() {
-    _receivePort?.close();
-    _activeIsolate?.kill(priority: Isolate.immediate);
-    _activeIsolate = null;
-    _receivePort = null;
+    unawaited(stopActiveGeneration());
   }
 }

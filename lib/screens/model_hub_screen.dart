@@ -1,8 +1,10 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:chatbud/models/hugging_face_model.dart';
 import 'package:chatbud/repositories/settings_repository.dart';
 import 'package:chatbud/services/huggingface_service.dart';
+import 'package:chatbud/services/llama_cpp_service.dart';
 import 'package:provider/provider.dart';
 
 class ModelHubScreen extends StatefulWidget {
@@ -101,9 +103,8 @@ class _ModelHubScreenState extends State<ModelHubScreen>
       }
     } catch (e) {
       if (mounted && !e.toString().contains('DOWNLOAD_CANCELLED')) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Download failed: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Download failed: $e')));
       }
     }
   }
@@ -150,9 +151,8 @@ class _ModelHubScreenState extends State<ModelHubScreen>
                       padding: const EdgeInsets.all(16),
                       child: Text(
                         repo.id,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
                         textAlign: TextAlign.center,
                       ),
                     ),
@@ -166,11 +166,14 @@ class _ModelHubScreenState extends State<ModelHubScreen>
                             itemCount: files.length,
                             itemBuilder: (context, index) {
                               final file = files[index];
-                              final isDownloading =
-                                  _hfService.isDownloading(file.fileName);
+                              final isDownloading = _hfService.isDownloading(
+                                file.fileName,
+                              );
 
                               return ListTile(
-                                leading: const Icon(Icons.insert_drive_file_outlined),
+                                leading: const Icon(
+                                  Icons.insert_drive_file_outlined,
+                                ),
                                 title: Text(
                                   file.fileName,
                                   style: const TextStyle(
@@ -181,11 +184,17 @@ class _ModelHubScreenState extends State<ModelHubScreen>
                                 subtitle: Text(file.formattedSize),
                                 trailing: isDownloading
                                     ? IconButton(
-                                        icon: const Icon(Icons.cancel_outlined, color: Colors.red),
-                                        onPressed: () => _cancelDownload(file.fileName),
+                                        icon: const Icon(
+                                          Icons.cancel_outlined,
+                                          color: Colors.red,
+                                        ),
+                                        onPressed: () =>
+                                            _cancelDownload(file.fileName),
                                       )
                                     : IconButton(
-                                        icon: const Icon(Icons.download_rounded),
+                                        icon: const Icon(
+                                          Icons.download_rounded,
+                                        ),
                                         onPressed: () {
                                           Navigator.pop(ctx);
                                           _startDownload(
@@ -272,7 +281,9 @@ class _ModelHubScreenState extends State<ModelHubScreen>
 
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -295,9 +306,7 @@ class _ModelHubScreenState extends State<ModelHubScreen>
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .primaryContainer
+                        color: Theme.of(context).colorScheme.primaryContainer
                             .withOpacity(0.5),
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -316,30 +325,41 @@ class _ModelHubScreenState extends State<ModelHubScreen>
                 Text(
                   preset.description,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 if (isDownloading) ...[
-                  LinearProgressIndicator(value: progress > 0 ? progress : null),
+                  LinearProgressIndicator(
+                    value: progress > 0 ? progress : null,
+                  ),
                   const SizedBox(height: 6),
                   Row(
                     children: [
                       Text(
                         statusText,
-                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
                       ),
                       const Spacer(),
                       TextButton.icon(
                         style: TextButton.styleFrom(
                           foregroundColor: Colors.red,
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           minimumSize: Size.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                         onPressed: () => _cancelDownload(preset.fileName),
                         icon: const Icon(Icons.close_rounded, size: 14),
-                        label: const Text('Cancel', style: TextStyle(fontSize: 12)),
+                        label: const Text(
+                          'Cancel',
+                          style: TextStyle(fontSize: 12),
+                        ),
                       ),
                     ],
                   ),
@@ -349,8 +369,15 @@ class _ModelHubScreenState extends State<ModelHubScreen>
                     children: [
                       if (isDownloaded)
                         const Chip(
-                          avatar: Icon(Icons.check_circle_rounded, color: Colors.green, size: 18),
-                          label: Text('Downloaded', style: TextStyle(fontSize: 12)),
+                          avatar: Icon(
+                            Icons.check_circle_rounded,
+                            color: Colors.green,
+                            size: 18,
+                          ),
+                          label: Text(
+                            'Downloaded',
+                            style: TextStyle(fontSize: 12),
+                          ),
                         )
                       else
                         ElevatedButton.icon(
@@ -387,7 +414,10 @@ class _ModelHubScreenState extends State<ModelHubScreen>
                   decoration: const InputDecoration(
                     hintText: 'Search GGUF repo (e.g. qwen, llama, phi)...',
                     border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                   ),
                   onSubmitted: (_) => _searchModels(),
                 ),
@@ -400,16 +430,24 @@ class _ModelHubScreenState extends State<ModelHubScreen>
             ],
           ),
         ),
-        if (_isSearching) const Expanded(child: Center(child: CircularProgressIndicator())),
+        if (_isSearching)
+          const Expanded(child: Center(child: CircularProgressIndicator())),
         if (_searchError.isNotEmpty)
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Text(_searchError, style: const TextStyle(color: Colors.red)),
+            child: Text(
+              _searchError,
+              style: const TextStyle(color: Colors.red),
+            ),
           ),
         if (!_isSearching && _searchError.isEmpty)
           Expanded(
             child: _searchResults.isEmpty
-                ? const Center(child: Text('Type a keyword to search Hugging Face GGUF models.'))
+                ? const Center(
+                    child: Text(
+                      'Type a keyword to search Hugging Face GGUF models.',
+                    ),
+                  )
                 : ListView.builder(
                     itemCount: _searchResults.length,
                     itemBuilder: (context, index) {
@@ -417,10 +455,18 @@ class _ModelHubScreenState extends State<ModelHubScreen>
                       return ListTile(
                         title: Text(
                           repo.id,
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
                         ),
-                        subtitle: Text('Downloads: ${repo.downloads} • Likes: ${repo.likes}'),
-                        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+                        subtitle: Text(
+                          'Downloads: ${repo.downloads} • Likes: ${repo.likes}',
+                        ),
+                        trailing: const Icon(
+                          Icons.arrow_forward_ios_rounded,
+                          size: 16,
+                        ),
                         onTap: () => _showRepoFilesSheet(repo),
                       );
                     },
@@ -430,15 +476,16 @@ class _ModelHubScreenState extends State<ModelHubScreen>
     );
   }
 
-  Widget _buildDownloadedTab(SettingsRepository settingsRepo, String? activeModelPath) {
+  Widget _buildDownloadedTab(
+    SettingsRepository settingsRepo,
+    String? activeModelPath,
+  ) {
     if (_isLoadingDownloaded) {
       return const Center(child: CircularProgressIndicator());
     }
 
     if (_downloadedFiles.isEmpty) {
-      return const Center(
-        child: Text('No downloaded .gguf models found.'),
-      );
+      return const Center(child: Text('No downloaded .gguf models found.'));
     }
 
     return ListView.builder(
@@ -454,7 +501,9 @@ class _ModelHubScreenState extends State<ModelHubScreen>
           child: ListTile(
             leading: Icon(
               Icons.memory_rounded,
-              color: isActive ? Colors.green : Theme.of(context).colorScheme.primary,
+              color: isActive
+                  ? Colors.green
+                  : Theme.of(context).colorScheme.primary,
             ),
             title: Text(
               fileName,
@@ -462,7 +511,9 @@ class _ModelHubScreenState extends State<ModelHubScreen>
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            subtitle: Text(isActive ? 'Active Engine Model' : 'Offline GGUF File'),
+            subtitle: Text(
+              isActive ? 'Active Engine Model' : 'Offline GGUF File',
+            ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -471,23 +522,38 @@ class _ModelHubScreenState extends State<ModelHubScreen>
                     tooltip: 'Set as Active Model',
                     icon: const Icon(Icons.check_circle_outline_rounded),
                     onPressed: () async {
+                      if (LlamaCppAiService.loadedModelPath != null &&
+                          LlamaCppAiService.loadedModelPath != file.path) {
+                        await LlamaCppAiService.unloadModel();
+                      }
                       await settingsRepo.updateModelPath(file.path);
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Set $fileName as Active Model!')),
+                          SnackBar(
+                            content: Text('Set $fileName as Active Model!'),
+                          ),
                         );
                       }
                     },
                   )
                 else
                   const Chip(
-                    label: Text('ACTIVE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                    label: Text(
+                      'ACTIVE',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     backgroundColor: Colors.greenAccent,
                   ),
                 IconButton(
                   tooltip: 'Delete File',
                   icon: const Icon(Icons.delete_outline, color: Colors.red),
                   onPressed: () async {
+                    if (LlamaCppAiService.loadedModelPath == file.path) {
+                      await LlamaCppAiService.unloadModel();
+                    }
                     await _hfService.deleteDownloadedFile(file.path);
                     if (isActive) {
                       await settingsRepo.updateModelPath(null);
