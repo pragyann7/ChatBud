@@ -5,6 +5,8 @@ class HuggingFaceRepo {
   final int downloads;
   final int likes;
   final List<String> tags;
+  final String pipelineTag;
+  final String license;
 
   HuggingFaceRepo({
     required this.id,
@@ -13,6 +15,8 @@ class HuggingFaceRepo {
     required this.downloads,
     required this.likes,
     required this.tags,
+    required this.pipelineTag,
+    required this.license,
   });
 
   factory HuggingFaceRepo.fromJson(Map<String, dynamic> json) {
@@ -21,13 +25,28 @@ class HuggingFaceRepo {
     final author = parts.length > 1 ? parts[0] : 'huggingface';
     final modelName = parts.length > 1 ? parts.sublist(1).join('/') : idStr;
 
+    final tagsList = (json['tags'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        [];
+
+    String foundLicense = 'LICENSE N/A';
+    for (final tag in tagsList) {
+      if (tag.startsWith('license:')) {
+        foundLicense = tag.substring(8).toUpperCase();
+        break;
+      }
+    }
+
     return HuggingFaceRepo(
       id: idStr,
       author: author,
       modelName: modelName,
       downloads: json['downloads'] as int? ?? 0,
       likes: json['likes'] as int? ?? 0,
-      tags: (json['tags'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
+      tags: tagsList,
+      pipelineTag: json['pipeline_tag'] as String? ?? 'text-generation',
+      license: foundLicense,
     );
   }
 }

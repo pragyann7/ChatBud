@@ -23,6 +23,14 @@ class LlamaCppAiService implements AiService {
   static StreamController<String>? _activeOutput;
   static StreamSubscription<GenerationEvent>? _activeGeneration;
 
+  /// Industry-standard idle keep-alive timeout (5 minutes, matching LM Studio, Ollama, & PocketPal AI).
+  static const Duration defaultKeepAliveDuration = Duration(minutes: 5);
+  static Timer? _inactivityTimer;
+
+  static final ValueNotifier<bool> isModelLoadingNotifier = ValueNotifier<bool>(false);
+  static final ValueNotifier<bool> isModelLoadedNotifier = ValueNotifier<bool>(false);
+
+  static bool get isModelLoading => _loading != null || isModelLoadingNotifier.value;
   static bool get isModelLoaded => _engine != null;
   static String? get loadedModelPath => _loadedModelPath;
 
@@ -51,12 +59,19 @@ class LlamaCppAiService implements AiService {
         'Stop the current response before changing models.',
       );
     }
-    if (_engine != null && _loadedModelPath == normalizedPath) return;
+    if (_engine != null && _loadedModelPath == normalizedPath) {
+      _scheduleInactivityUnload();
+      return;
+    }
     if (_loading != null) {
       await _loading;
-      if (_engine != null && _loadedModelPath == normalizedPath) return;
+      if (_engine != null && _loadedModelPath == normalizedPath) {
+        _scheduleInactivityUnload();
+        return;
+      }
     }
 
+    isModelLoadingNotifier.value = true;
     final completer = Completer<void>();
     _loading = completer.future;
     try {
@@ -86,13 +101,46 @@ class LlamaCppAiService implements AiService {
 
       _engine = engine;
       _loadedModelPath = normalizedPath;
+      isModelLoadedNotifier.value = true;
+      _scheduleInactivityUnload();
     } catch (error) {
       _loadedModelPath = null;
+      isModelLoadedNotifier.value = false;
       if (error is AiServiceException) rethrow;
       throw AiServiceException('Could not load the local model: $error');
     } finally {
       _loading = null;
+      isModelLoadingNotifier.value = false;
       if (!completer.isCompleted) completer.complete();
+    }
+  }
+
+  static void _scheduleInactivityUnload([Duration? duration]) {
+    _inactivityTimer?.cancel();
+    if (!isModelLoaded) return;
+    final timeout = duration ?? defaultKeepAliveDuration;
+    _inactivityTimer = Timer(timeout, () {
+      if (_activeGeneration == null && _activeOutput == null) {
+        debugPrint(
+          'llama.cpp model idle for ${timeout.inMinutes} minutes. '
+          'Auto-unloading from RAM according to production standard.',
+        );
+        unawaited(unloadModel());
+      } else {
+        _scheduleInactivityUnload();
+      }
+    });
+  }
+
+  static void _cancelInactivityTimer() {
+    _inactivityTimer?.cancel();
+    _inactivityTimer = null;
+  }
+
+  /// Extends the model keep-alive TTL during active user interaction.
+  static void touchActivity() {
+    if (isModelLoaded && _activeGeneration == null) {
+      _scheduleInactivityUnload();
     }
   }
 
@@ -100,6 +148,7 @@ class LlamaCppAiService implements AiService {
     final engine = _engine;
     _engine = null;
     _loadedModelPath = null;
+    isModelLoadedNotifier.value = false;
     if (engine == null) return;
     try {
       await engine.dispose();
@@ -109,6 +158,7 @@ class LlamaCppAiService implements AiService {
   }
 
   static Future<void> unloadModel() async {
+    _cancelInactivityTimer();
     await stopActiveGeneration();
     await _disposeRuntime();
   }
@@ -156,6 +206,7 @@ class LlamaCppAiService implements AiService {
 
     final output = StreamController<String>();
     _activeOutput = output;
+    _cancelInactivityTimer();
     EngineChat? chat;
     try {
       chat = await _engine!.createChat();
@@ -215,6 +266,9 @@ class LlamaCppAiService implements AiService {
       await chat?.dispose();
       if (!output.isClosed) await output.close();
       if (identical(_activeOutput, output)) _activeOutput = null;
+      if (isModelLoaded) {
+        _scheduleInactivityUnload();
+      }
     }
   }
 

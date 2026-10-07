@@ -9,7 +9,7 @@ import 'package:chatbud/repositories/bud_repository.dart';
 import 'package:chatbud/repositories/conversation_repository.dart';
 import 'package:chatbud/repositories/message_repository.dart';
 import 'package:chatbud/repositories/settings_repository.dart';
-import 'package:chatbud/screens/model_hub_screen.dart';
+import 'package:chatbud/screens/models_screen.dart';
 import 'package:chatbud/services/generation_manager.dart';
 import 'package:chatbud/services/llama_cpp_service.dart';
 import 'package:chatbud/widgets/bud_selector.dart';
@@ -21,14 +21,18 @@ class ChatScreen extends StatefulWidget {
   final Conversation? conversation;
   final ValueChanged<Conversation>? onConversationCreated;
 
-  const ChatScreen({super.key, this.conversation, this.onConversationCreated});
+  const ChatScreen({
+    super.key,
+    this.conversation,
+    this.onConversationCreated,
+  });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  static const int _messagePageSize = 50;
+  static const int _pageSize = 50;
 
   late ConversationRepository _conversationRepository;
   late MessageRepository _messageRepository;
@@ -39,11 +43,10 @@ class _ChatScreenState extends State<ChatScreen> {
   Bud? _activeBud; // null = No Bud / Raw LLM
   List<Message> _messages = [];
   bool _isLoading = true;
+  bool _isLoadingOlderMessages = false;
+  bool _hasOlderMessages = true;
   bool _isSubmitting = false;
   bool _isModelLoading = false;
-  int _messageOffset = 0;
-  bool _hasOlderMessages = false;
-  bool _isLoadingOlderMessages = false;
 
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -77,7 +80,7 @@ class _ChatScreenState extends State<ChatScreen> {
         final savedMessages = await _messageRepository
             .getMessagesForConversationPaginated(
               widget.conversation!.id,
-              limit: _messagePageSize,
+              limit: _pageSize,
               offset: 0,
             );
 
@@ -96,7 +99,9 @@ class _ChatScreenState extends State<ChatScreen> {
               budId: msg.budId,
             );
             savedMessages[i] = recovered;
-            await _messageRepository.saveMessageAndTouchConversation(recovered);
+            await _messageRepository.saveMessageAndTouchConversation(
+              recovered,
+            );
           }
         }
 
@@ -112,8 +117,7 @@ class _ChatScreenState extends State<ChatScreen> {
           setState(() {
             _currentConversation = widget.conversation;
             _messages = savedMessages;
-            _messageOffset = savedMessages.length;
-            _hasOlderMessages = savedMessages.length == _messagePageSize;
+            _hasOlderMessages = savedMessages.length >= _pageSize;
           });
         }
       }
@@ -129,6 +133,49 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() {
           _activeBud = loadedBud;
           _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadOlderMessages() async {
+    final conversation = _currentConversation;
+    if (conversation == null ||
+        _isLoadingOlderMessages ||
+        !_hasOlderMessages) {
+      return;
+    }
+
+    setState(() {
+      _isLoadingOlderMessages = true;
+    });
+
+    try {
+      final olderMessages = await _messageRepository
+          .getMessagesForConversationPaginated(
+            conversation.id,
+            limit: _pageSize,
+            offset: _messages.length,
+          );
+
+      if (!mounted) return;
+
+      setState(() {
+        if (olderMessages.isEmpty) {
+          _hasOlderMessages = false;
+        } else {
+          _messages = [...olderMessages, ..._messages];
+          if (olderMessages.length < _pageSize) {
+            _hasOlderMessages = false;
+          }
+        }
+      });
+    } catch (e) {
+      debugPrint("Failed to load older messages: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingOlderMessages = false;
         });
       }
     }
@@ -184,45 +231,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _loadOlderMessages() async {
-    final conversation = _currentConversation;
-    if (!mounted ||
-        conversation == null ||
-        !_hasOlderMessages ||
-        _isLoadingOlderMessages) {
-      return;
-    }
-
-    setState(() => _isLoadingOlderMessages = true);
-    try {
-      final olderMessages = await _messageRepository
-          .getMessagesForConversationPaginated(
-            conversation.id,
-            limit: _messagePageSize,
-            offset: _messageOffset,
-          );
-      if (!mounted) return;
-
-      final loadedIds = _messages.map((message) => message.id).toSet();
-      final uniqueOlderMessages = olderMessages
-          .where((message) => !loadedIds.contains(message.id))
-          .toList(growable: false);
-      setState(() {
-        _messages.insertAll(0, uniqueOlderMessages);
-        _messageOffset += olderMessages.length;
-        _hasOlderMessages = olderMessages.length == _messagePageSize;
-      });
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not load older messages: $error')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoadingOlderMessages = false);
-    }
-  }
-
   void _scrollToLatest({bool force = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) return;
@@ -243,7 +251,7 @@ class _ChatScreenState extends State<ChatScreen> {
         return AlertDialog(
           title: const Text("GGUF Model Required"),
           content: const Text(
-            "To use 100% offline llama.cpp inference, please download a model from Model Hub or select a local .gguf file.",
+            "To use 100% offline llama.cpp inference, please download a model from Models or select a local .gguf file.",
           ),
           actions: [
             TextButton(
@@ -256,12 +264,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => const ModelHubScreen(),
+                    builder: (context) => const ModelsScreen(),
                   ),
                 );
               },
               icon: const Icon(Icons.cloud_download_rounded, size: 18),
-              label: const Text("Open Model Hub"),
+              label: const Text("Open Models"),
             ),
           ],
         );
@@ -273,24 +281,20 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() => _isModelLoading = true);
     String? errorMessage;
     try {
-      final settings = await _settingsRepository.getSettings();
-      await LlamaCppAiService.loadModel(
-        modelPath,
-        cpuThreads: settings.cpuThreads,
-        contextSize: settings.contextSize,
-        batchSize: settings.batchSize,
-      );
+      await LlamaCppAiService.loadModel(modelPath);
     } catch (error) {
-      errorMessage = error.toString();
-    }
-    if (mounted) {
-      setState(() => _isModelLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(errorMessage ?? "Model loaded into RAM successfully!"),
-          backgroundColor: errorMessage == null ? null : Colors.red.shade700,
-        ),
-      );
+      errorMessage = "$error";
+    } finally {
+      if (mounted) {
+        setState(() => _isModelLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              errorMessage ?? "Model loaded into RAM successfully!",
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -298,9 +302,9 @@ class _ChatScreenState extends State<ChatScreen> {
     await LlamaCppAiService.unloadModel();
     if (mounted) {
       setState(() {});
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Model unloaded from RAM.")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Model unloaded from RAM.")),
+      );
     }
   }
 
@@ -373,8 +377,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _sendMessage() async {
     final genManager = context.read<GenerationManager>();
-    final isCurrentGenerating =
-        _currentConversation != null &&
+    final isCurrentGenerating = _currentConversation != null &&
         genManager.isGenerating(_currentConversation!.id);
 
     if (_isSubmitting || isCurrentGenerating) return;
@@ -398,9 +401,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
     try {
       if (_currentConversation == null) {
-        final title = prompt.length > 25
-            ? "${prompt.substring(0, 25)}..."
-            : prompt;
+        final title =
+            prompt.length > 25 ? "${prompt.substring(0, 25)}..." : prompt;
         _currentConversation = Conversation(
           title: title,
           createdAt: now,
@@ -409,7 +411,10 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       } else {
         _currentConversation = _activeBud == null
-            ? _currentConversation!.copyWith(clearBudId: true, updatedAt: now)
+            ? _currentConversation!.copyWith(
+                clearBudId: true,
+                updatedAt: now,
+              )
             : _currentConversation!.copyWith(
                 budId: _activeBud!.id,
                 updatedAt: now,
@@ -432,8 +437,8 @@ class _ChatScreenState extends State<ChatScreen> {
         budId: _activeBud?.id,
       );
 
-      final savedMessages = await _messageRepository
-          .saveMessagePairAndTouchConversation(
+      final savedMessages =
+          await _messageRepository.saveMessagePairAndTouchConversation(
             conversation: _currentConversation!,
             userMessage: userMessage,
             assistantMessage: assistantMessage,
@@ -505,20 +510,16 @@ class _ChatScreenState extends State<ChatScreen> {
       if (needsRefresh) {
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted || _currentConversation == null) return;
-          final refreshLimit = _messageOffset > _messagePageSize
-              ? _messageOffset
-              : _messagePageSize;
           final freshMessages = await _messageRepository
               .getMessagesForConversationPaginated(
                 _currentConversation!.id,
-                limit: refreshLimit,
+                limit: _pageSize,
                 offset: 0,
               );
           if (mounted) {
             setState(() {
               _messages = freshMessages;
-              _messageOffset = freshMessages.length;
-              _hasOlderMessages = freshMessages.length == refreshLimit;
+              _hasOlderMessages = freshMessages.length >= _pageSize;
             });
           }
         });
@@ -541,8 +542,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     final genManager = context.watch<GenerationManager>();
-    final isGeneratingThisChat =
-        _currentConversation != null &&
+    final isGeneratingThisChat = _currentConversation != null &&
         genManager.isGenerating(_currentConversation!.id);
     final isInputGenerating = isGeneratingThisChat || _isSubmitting;
 
@@ -582,7 +582,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              color: Theme.of(context).colorScheme.surfaceContainerHighest
+              color: Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest
                   .withOpacity(0.5),
               child: Row(
                 children: [
@@ -599,8 +601,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       isLoaded
                           ? "Loaded: ${fileName ?? 'Model'} (RAM Active)"
                           : (fileName != null
-                                ? "Model Ready: $fileName"
-                                : "No Model Loaded"),
+                              ? "Model Ready: $fileName"
+                              : "No Model Loaded"),
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
@@ -662,9 +664,9 @@ class _ChatScreenState extends State<ChatScreen> {
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                       onPressed: _showModelRequiredDialog,
-                      icon: const Icon(Icons.cloud_download_rounded, size: 14),
+                      icon: const Icon(Icons.memory_rounded, size: 14),
                       label: const Text(
-                        "Model Hub",
+                        "Models",
                         style: TextStyle(fontSize: 11),
                       ),
                     ),
@@ -706,15 +708,15 @@ class _ChatScreenState extends State<ChatScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => const ModelHubScreen(),
+                              builder: (context) => const ModelsScreen(),
                             ),
                           );
                         },
                         icon: const Icon(
-                          Icons.cloud_download_rounded,
+                          Icons.memory_rounded,
                           size: 18,
                         ),
-                        label: const Text("Model Hub (Download GGUF)"),
+                        label: const Text("Models"),
                       ),
                     ],
                   ),
@@ -723,22 +725,21 @@ class _ChatScreenState extends State<ChatScreen> {
                 ListView.builder(
                   controller: _scrollController,
                   reverse: true,
-                  itemCount:
-                      _messages.length +
-                      (_hasOlderMessages || _isLoadingOlderMessages ? 1 : 0),
+                  itemCount: _messages.length + (_isLoadingOlderMessages ? 1 : 0),
                   itemBuilder: (context, index) {
-                    if (index >= _messages.length) {
+                    if (_isLoadingOlderMessages && index == _messages.length) {
                       return const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 16),
+                        padding: EdgeInsets.symmetric(vertical: 12),
                         child: Center(
                           child: SizedBox(
-                            width: 22,
-                            height: 22,
+                            width: 18,
+                            height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           ),
                         ),
                       );
                     }
+
                     final message = _messages[_messages.length - 1 - index];
                     final isLatestMessage =
                         _messages.isNotEmpty && _messages.last.id == message.id;
