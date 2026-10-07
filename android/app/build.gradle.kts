@@ -55,8 +55,10 @@ android {
         release {
             // Never ship a release signed with the public debug key. Supply
             // these Gradle properties in a protected local/CI configuration.
-            if (hasReleaseSigning) {
-                signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
             }
         }
     }

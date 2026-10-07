@@ -89,12 +89,40 @@ class HuggingFaceService extends ChangeNotifier {
     return modelsDir.path;
   }
 
+  Future<List<HuggingFaceRepo>> fetchTrendingGgufModels() async {
+    final url = Uri.parse(
+      'https://huggingface.co/api/models?filter=gguf&limit=24&sort=downloads',
+    );
+
+    try {
+      final response = await _client
+          .get(url)
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) {
+        throw Exception(
+          'Hugging Face API returned HTTP ${response.statusCode}',
+        );
+      }
+
+      final List<dynamic> jsonList = jsonDecode(response.body) as List<dynamic>;
+      return jsonList
+          .map((item) => HuggingFaceRepo.fromJson(item as Map<String, dynamic>))
+          .where((repo) => repo.id.isNotEmpty)
+          .toList();
+    } catch (e) {
+      debugPrint('Error fetching trending Hugging Face models: $e');
+      rethrow;
+    }
+  }
+
   Future<List<HuggingFaceRepo>> searchGgufModels(String query) async {
-    if (query.trim().isEmpty) return [];
+    if (query.trim().isEmpty) {
+      return fetchTrendingGgufModels();
+    }
 
     final cleanQuery = Uri.encodeComponent(query.trim());
     final url = Uri.parse(
-      'https://huggingface.co/api/models?search=$cleanQuery&filter=gguf&limit=25&sort=downloads',
+      'https://huggingface.co/api/models?search=$cleanQuery&filter=gguf&limit=24&sort=downloads',
     );
 
     try {

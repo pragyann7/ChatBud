@@ -9,7 +9,7 @@ import 'package:chatbud/repositories/bud_repository.dart';
 import 'package:chatbud/repositories/conversation_repository.dart';
 import 'package:chatbud/repositories/message_repository.dart';
 import 'package:chatbud/repositories/settings_repository.dart';
-import 'package:chatbud/screens/model_hub_screen.dart';
+import 'package:chatbud/screens/models_screen.dart';
 import 'package:chatbud/services/generation_manager.dart';
 import 'package:chatbud/services/llama_cpp_service.dart';
 import 'package:chatbud/widgets/bud_selector.dart';
@@ -21,14 +21,18 @@ class ChatScreen extends StatefulWidget {
   final Conversation? conversation;
   final ValueChanged<Conversation>? onConversationCreated;
 
-  const ChatScreen({super.key, this.conversation, this.onConversationCreated});
+  const ChatScreen({
+    super.key,
+    this.conversation,
+    this.onConversationCreated,
+  });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
-  static const int _messagePageSize = 50;
+class _ChatScreenState extends State<ChatScreen> {
+  static const int _pageSize = 50;
 
   late ConversationRepository _conversationRepository;
   late MessageRepository _messageRepository;
@@ -39,11 +43,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Bud? _activeBud; // null = No Bud / Raw LLM
   List<Message> _messages = [];
   bool _isLoading = true;
+  bool _isLoadingOlderMessages = false;
+  bool _hasOlderMessages = true;
   bool _isSubmitting = false;
   bool _isModelLoading = false;
-  int _messageOffset = 0;
-  bool _hasOlderMessages = false;
-  bool _isLoadingOlderMessages = false;
 
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -52,32 +55,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_handleScroll);
-    _textController.addListener(_handleTextChange);
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      debugPrint("ChatScreen: App resumed, auto-preloading model if needed");
-      _autoPreloadModelIfNeeded();
-    }
-  }
-
-  void _handleTextChange() {
-    LlamaCppAiService.touchActivity();
-  }
-
-  @override
-  void didUpdateWidget(ChatScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.conversation?.id != widget.conversation?.id) {
-      LlamaCppAiService.touchActivity();
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _autoPreloadModelIfNeeded();
-      });
-    }
   }
 
   @override
@@ -102,7 +80,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final savedMessages = await _messageRepository
             .getMessagesForConversationPaginated(
               widget.conversation!.id,
-              limit: _messagePageSize,
+              limit: _pageSize,
               offset: 0,
             );
 
@@ -121,7 +99,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               budId: msg.budId,
             );
             savedMessages[i] = recovered;
-            await _messageRepository.saveMessageAndTouchConversation(recovered);
+            await _messageRepository.saveMessageAndTouchConversation(
+              recovered,
+            );
           }
         }
 
@@ -137,8 +117,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           setState(() {
             _currentConversation = widget.conversation;
             _messages = savedMessages;
-            _messageOffset = savedMessages.length;
-            _hasOlderMessages = savedMessages.length == _messagePageSize;
+            _hasOlderMessages = savedMessages.length >= _pageSize;
           });
         }
       }
@@ -155,38 +134,50 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _activeBud = loadedBud;
           _isLoading = false;
         });
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _autoPreloadModelIfNeeded();
-        });
       }
     }
   }
 
-  Future<void> _autoPreloadModelIfNeeded() async {
-    if (!mounted || !Platform.isAndroid) return;
+  Future<void> _loadOlderMessages() async {
+    final conversation = _currentConversation;
+    if (conversation == null ||
+        _isLoadingOlderMessages ||
+        !_hasOlderMessages) {
+      return;
+    }
+
+    setState(() {
+      _isLoadingOlderMessages = true;
+    });
+
     try {
-      final settings = await _settingsRepository.getSettings();
-      if (settings.engineType != 'llama_cpp') return;
+      final olderMessages = await _messageRepository
+          .getMessagesForConversationPaginated(
+            conversation.id,
+            limit: _pageSize,
+            offset: _messages.length,
+          );
 
-      final path = settings.modelPath;
-      if (path == null || path.trim().isEmpty) return;
+      if (!mounted) return;
 
-      final file = File(path);
-      if (!await file.exists() || await file.length() < 4) return;
-
-      if (LlamaCppAiService.isModelLoaded || LlamaCppAiService.isModelLoading) {
-        return;
+      setState(() {
+        if (olderMessages.isEmpty) {
+          _hasOlderMessages = false;
+        } else {
+          _messages = [...olderMessages, ..._messages];
+          if (olderMessages.length < _pageSize) {
+            _hasOlderMessages = false;
+          }
+        }
+      });
+    } catch (e) {
+      debugPrint("Failed to load older messages: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingOlderMessages = false;
+        });
       }
-
-      debugPrint("PocketPal pattern: Background pre-warming model: ${file.path}");
-      await LlamaCppAiService.loadModel(
-        file.path,
-        cpuThreads: settings.cpuThreads,
-        contextSize: settings.contextSize,
-        batchSize: settings.batchSize,
-      );
-    } catch (error) {
-      debugPrint("Auto-preload model notice (non-fatal): $error");
     }
   }
 
@@ -240,45 +231,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _loadOlderMessages() async {
-    final conversation = _currentConversation;
-    if (!mounted ||
-        conversation == null ||
-        !_hasOlderMessages ||
-        _isLoadingOlderMessages) {
-      return;
-    }
-
-    setState(() => _isLoadingOlderMessages = true);
-    try {
-      final olderMessages = await _messageRepository
-          .getMessagesForConversationPaginated(
-            conversation.id,
-            limit: _messagePageSize,
-            offset: _messageOffset,
-          );
-      if (!mounted) return;
-
-      final loadedIds = _messages.map((message) => message.id).toSet();
-      final uniqueOlderMessages = olderMessages
-          .where((message) => !loadedIds.contains(message.id))
-          .toList(growable: false);
-      setState(() {
-        _messages.insertAll(0, uniqueOlderMessages);
-        _messageOffset += olderMessages.length;
-        _hasOlderMessages = olderMessages.length == _messagePageSize;
-      });
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not load older messages: $error')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoadingOlderMessages = false);
-    }
-  }
-
   void _scrollToLatest({bool force = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) return;
@@ -299,7 +251,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return AlertDialog(
           title: const Text("GGUF Model Required"),
           content: const Text(
-            "To use 100% offline llama.cpp inference, please download a model from Model Hub or select a local .gguf file.",
+            "To use 100% offline llama.cpp inference, please download a model from Models or select a local .gguf file.",
           ),
           actions: [
             TextButton(
@@ -312,12 +264,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => const ModelHubScreen(),
+                    builder: (context) => const ModelsScreen(),
                   ),
                 );
               },
               icon: const Icon(Icons.cloud_download_rounded, size: 18),
-              label: const Text("Open Model Hub"),
+              label: const Text("Open Models"),
             ),
           ],
         );
@@ -329,24 +281,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     setState(() => _isModelLoading = true);
     String? errorMessage;
     try {
-      final settings = await _settingsRepository.getSettings();
-      await LlamaCppAiService.loadModel(
-        modelPath,
-        cpuThreads: settings.cpuThreads,
-        contextSize: settings.contextSize,
-        batchSize: settings.batchSize,
-      );
+      await LlamaCppAiService.loadModel(modelPath);
     } catch (error) {
-      errorMessage = error.toString();
-    }
-    if (mounted) {
-      setState(() => _isModelLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(errorMessage ?? "Model loaded into RAM successfully!"),
-          backgroundColor: errorMessage == null ? null : Colors.red.shade700,
-        ),
-      );
+      errorMessage = "$error";
+    } finally {
+      if (mounted) {
+        setState(() => _isModelLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              errorMessage ?? "Model loaded into RAM successfully!",
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -354,9 +302,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     await LlamaCppAiService.unloadModel();
     if (mounted) {
       setState(() {});
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Model unloaded from RAM.")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Model unloaded from RAM.")),
+      );
     }
   }
 
@@ -429,8 +377,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _sendMessage() async {
     final genManager = context.read<GenerationManager>();
-    final isCurrentGenerating =
-        _currentConversation != null &&
+    final isCurrentGenerating = _currentConversation != null &&
         genManager.isGenerating(_currentConversation!.id);
 
     if (_isSubmitting || isCurrentGenerating) return;
@@ -454,9 +401,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     try {
       if (_currentConversation == null) {
-        final title = prompt.length > 25
-            ? "${prompt.substring(0, 25)}..."
-            : prompt;
+        final title =
+            prompt.length > 25 ? "${prompt.substring(0, 25)}..." : prompt;
         _currentConversation = Conversation(
           title: title,
           createdAt: now,
@@ -465,7 +411,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
       } else {
         _currentConversation = _activeBud == null
-            ? _currentConversation!.copyWith(clearBudId: true, updatedAt: now)
+            ? _currentConversation!.copyWith(
+                clearBudId: true,
+                updatedAt: now,
+              )
             : _currentConversation!.copyWith(
                 budId: _activeBud!.id,
                 updatedAt: now,
@@ -488,8 +437,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         budId: _activeBud?.id,
       );
 
-      final savedMessages = await _messageRepository
-          .saveMessagePairAndTouchConversation(
+      final savedMessages =
+          await _messageRepository.saveMessagePairAndTouchConversation(
             conversation: _currentConversation!,
             userMessage: userMessage,
             assistantMessage: assistantMessage,
@@ -561,20 +510,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (needsRefresh) {
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted || _currentConversation == null) return;
-          final refreshLimit = _messageOffset > _messagePageSize
-              ? _messageOffset
-              : _messagePageSize;
           final freshMessages = await _messageRepository
               .getMessagesForConversationPaginated(
                 _currentConversation!.id,
-                limit: refreshLimit,
+                limit: _pageSize,
                 offset: 0,
               );
           if (mounted) {
             setState(() {
               _messages = freshMessages;
-              _messageOffset = freshMessages.length;
-              _hasOlderMessages = freshMessages.length == refreshLimit;
+              _hasOlderMessages = freshMessages.length >= _pageSize;
             });
           }
         });
@@ -584,9 +529,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _scrollController.removeListener(_handleScroll);
-    _textController.removeListener(_handleTextChange);
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -599,170 +542,139 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
 
     final genManager = context.watch<GenerationManager>();
-    final isGeneratingThisChat =
-        _currentConversation != null &&
+    final isGeneratingThisChat = _currentConversation != null &&
         genManager.isGenerating(_currentConversation!.id);
     final isInputGenerating = isGeneratingThisChat || _isSubmitting;
 
     _checkAndSyncCompletedBackgroundJobs(genManager);
 
-    return StreamBuilder<AppSettings?>(
-      stream: _settingsRepository.watchSettings(),
-      builder: (context, snapshot) {
-        final settings = snapshot.data;
-        final isLlamaCpp = settings?.engineType == 'llama_cpp';
+    return Column(
+      children: [
+        // Bud Selector Header Bar
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          alignment: Alignment.centerLeft,
+          color: Theme.of(context).colorScheme.surface,
+          child: Row(
+            children: [
+              BudSelectorChip(
+                activeBud: _activeBud,
+                onBudSelected: _onBudChanged,
+              ),
+              const Spacer(),
+            ],
+          ),
+        ),
+        // llama.cpp On-Device Model Status Bar
+        StreamBuilder<AppSettings?>(
+          stream: _settingsRepository.watchSettings(),
+          builder: (context, snapshot) {
+            final settings = snapshot.data;
+            if (settings?.engineType != 'llama_cpp') {
+              return const SizedBox.shrink();
+            }
 
-        return ListenableBuilder(
-          listenable: Listenable.merge([
-            LlamaCppAiService.isModelLoadingNotifier,
-            LlamaCppAiService.isModelLoadedNotifier,
-          ]),
-          builder: (context, _) {
-            final isLoaded = LlamaCppAiService.isModelLoaded;
-            final isCurrentlyLoading =
-                _isModelLoading || LlamaCppAiService.isModelLoading;
             final modelPath = settings?.modelPath;
+            final isLoaded = LlamaCppAiService.isModelLoaded;
             final fileName = modelPath != null
                 ? modelPath.split('/').last
                 : null;
 
-            final bool isInputEnabled;
-            final String hintText;
-
-            if (isLlamaCpp) {
-              if (isCurrentlyLoading) {
-                isInputEnabled = false;
-                hintText = "Warming up model...";
-              } else if (!isLoaded) {
-                isInputEnabled = false;
-                hintText = "Model not loaded";
-              } else {
-                isInputEnabled = true;
-                hintText = "Type a message…";
-              }
-            } else {
-              isInputEnabled = true;
-              hintText = "Type a message…";
-            }
-
-            return Column(
-              children: [
-                // Bud Selector Header Bar
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  alignment: Alignment.centerLeft,
-                  color: Theme.of(context).colorScheme.surface,
-                  child: Row(
-                    children: [
-                      BudSelectorChip(
-                        activeBud: _activeBud,
-                        onBudSelected: _onBudChanged,
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              color: Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest
+                  .withOpacity(0.5),
+              child: Row(
+                children: [
+                  Icon(
+                    isLoaded ? Icons.bolt_rounded : Icons.memory_rounded,
+                    size: 16,
+                    color: isLoaded
+                        ? Colors.green
+                        : Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      isLoaded
+                          ? "Loaded: ${fileName ?? 'Model'} (RAM Active)"
+                          : (fileName != null
+                              ? "Model Ready: $fileName"
+                              : "No Model Loaded"),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: isLoaded
+                            ? Colors.green
+                            : Theme.of(context).colorScheme.primary,
                       ),
-                      const Spacer(),
-                    ],
-                  ),
-                ),
-                // llama.cpp On-Device Model Status Bar
-                if (isLlamaCpp)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 6,
-                    ),
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest
-                        .withOpacity(0.5),
-                    child: Row(
-                      children: [
-                        Icon(
-                          isLoaded ? Icons.bolt_rounded : Icons.memory_rounded,
-                          size: 16,
-                          color: isLoaded
-                              ? Colors.green
-                              : Theme.of(context).colorScheme.primary,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            isCurrentlyLoading
-                                ? "Warming up: ${fileName ?? 'Model'}..."
-                                : isLoaded
-                                    ? "Loaded: ${fileName ?? 'Model'} (RAM Active)"
-                                    : (fileName != null
-                                          ? "Model Ready: $fileName"
-                                          : "No Model Loaded"),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: isLoaded
-                                  ? Colors.green
-                                  : Theme.of(context).colorScheme.primary,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (isCurrentlyLoading)
-                          const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        else if (isLoaded)
-                          TextButton(
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            onPressed: _unloadLocalGgufModel,
-                            child: const Text(
-                              "Unload RAM",
-                              style: TextStyle(fontSize: 11),
-                            ),
-                          )
-                        else if (fileName != null)
-                          FilledButton.icon(
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 4,
-                              ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            onPressed: () => _loadLocalGgufModel(modelPath!),
-                            icon: const Icon(Icons.bolt_rounded, size: 14),
-                            label: const Text(
-                              "Load Model",
-                              style: TextStyle(fontSize: 11),
-                            ),
-                          )
-                        else
-                          TextButton.icon(
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            onPressed: _showModelRequiredDialog,
-                            icon: const Icon(
-                              Icons.cloud_download_rounded,
-                              size: 14,
-                            ),
-                            label: const Text(
-                              "Get Model",
-                              style: TextStyle(fontSize: 11),
-                            ),
-                          ),
-                      ],
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  if (_isModelLoading)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else if (isLoaded)
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: _unloadLocalGgufModel,
+                      child: const Text(
+                        "Unload RAM",
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    )
+                  else if (fileName != null)
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: () => _loadLocalGgufModel(modelPath!),
+                      icon: const Icon(Icons.bolt_rounded, size: 14),
+                      label: const Text(
+                        "Load Model",
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    )
+                  else
+                    TextButton.icon(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: _showModelRequiredDialog,
+                      icon: const Icon(Icons.memory_rounded, size: 14),
+                      label: const Text(
+                        "Models",
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        ),
         const Divider(height: 1),
         Expanded(
           child: Stack(
@@ -796,15 +708,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => const ModelHubScreen(),
+                              builder: (context) => const ModelsScreen(),
                             ),
                           );
                         },
                         icon: const Icon(
-                          Icons.cloud_download_rounded,
+                          Icons.memory_rounded,
                           size: 18,
                         ),
-                        label: const Text("Model Hub (Download GGUF)"),
+                        label: const Text("Models"),
                       ),
                     ],
                   ),
@@ -813,22 +725,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ListView.builder(
                   controller: _scrollController,
                   reverse: true,
-                  itemCount:
-                      _messages.length +
-                      (_hasOlderMessages || _isLoadingOlderMessages ? 1 : 0),
+                  itemCount: _messages.length + (_isLoadingOlderMessages ? 1 : 0),
                   itemBuilder: (context, index) {
-                    if (index >= _messages.length) {
+                    if (_isLoadingOlderMessages && index == _messages.length) {
                       return const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 16),
+                        padding: EdgeInsets.symmetric(vertical: 12),
                         child: Center(
                           child: SizedBox(
-                            width: 22,
-                            height: 22,
+                            width: 18,
+                            height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           ),
                         ),
                       );
                     }
+
                     final message = _messages[_messages.length - 1 - index];
                     final isLatestMessage =
                         _messages.isNotEmpty && _messages.last.id == message.id;
@@ -865,17 +776,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ChatInput(
           controller: _textController,
           isGenerating: isInputGenerating,
-          enabled: isInputEnabled,
-          hintText: hintText,
           onSend: _sendMessage,
           onStop: _stopGeneration,
           onAddAttachment: () {},
         ),
       ],
-    );
-          },
-        );
-      },
     );
   }
 }
