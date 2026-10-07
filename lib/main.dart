@@ -422,6 +422,17 @@ class AppDrawer extends StatelessWidget {
               onTap: () => Navigator.pop(context),
             ),
             ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text("Settings"),
+              onTap: () {
+                Navigator.pop(context);
+              Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const SettingsScreen()),
+            );
+    },
+            ),
+            ListTile(
               leading: const Icon(Icons.psychology_outlined),
               title: const Text("Buds (AI Personalities)"),
               onTap: () {
@@ -711,18 +722,6 @@ class AppDrawer extends StatelessWidget {
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    tooltip: "Settings",
-                    onPressed: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const SettingsScreen()),
-                      );
-                    },
-                    icon: const Icon(Icons.settings_outlined),
                   ),
                 ],
               ),
