@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:chatbud/models/app_settings.dart';
 import 'package:chatbud/models/hugging_face_model.dart';
@@ -129,6 +130,30 @@ class _ModelsScreenState extends State<ModelsScreen>
       if (mounted && !e.toString().contains('DOWNLOAD_CANCELLED')) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
+    }
+  }
+
+  Future<void> _pickLocalGgufFile(SettingsRepository settingsRepo) async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.any,
+    );
+    if (result != null &&
+        result.files.isNotEmpty &&
+        result.files.single.path != null) {
+      final selectedPath = result.files.single.path!;
+      if (LlamaCppAiService.loadedModelPath != null &&
+          LlamaCppAiService.loadedModelPath != selectedPath) {
+        await LlamaCppAiService.unloadModel();
+      }
+      await settingsRepo.updateModelPath(selectedPath);
+      await _loadDownloadedModels();
+
+      if (mounted) {
+        final name = selectedPath.split('/').last;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Imported and set active model: $name')),
+        );
       }
     }
   }
@@ -370,7 +395,10 @@ class _ModelsScreenState extends State<ModelsScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Models'),
+        title: const Text(
+          'Model Hub & Management',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
@@ -386,19 +414,136 @@ class _ModelsScreenState extends State<ModelsScreen>
           return StreamBuilder<AppSettings?>(
             stream: settingsRepo.watchSettings(),
             builder: (context, snapshot) {
-              final activeModelPath = snapshot.data?.modelPath;
+              final settings = snapshot.data;
+              final activeModelPath = settings?.modelPath;
 
-              return TabBarView(
-                controller: _tabController,
+              return Column(
                 children: [
-                  _buildRecommendedTab(activeModelPath),
-                  _buildSearchTab(),
-                  _buildDownloadedTab(settingsRepo, activeModelPath),
+                  // ACTIVE MODEL TOP STATUS BANNER
+                  _buildActiveModelTopBanner(context, settings),
+
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildRecommendedTab(activeModelPath),
+                        _buildSearchTab(),
+                        _buildDownloadedTab(settingsRepo, activeModelPath),
+                      ],
+                    ),
+                  ),
                 ],
               );
             },
           );
         },
+      ),
+    );
+  }
+
+  // TOP ACTIVE MODEL BANNER
+  Widget _buildActiveModelTopBanner(
+    BuildContext context,
+    AppSettings? settings,
+  ) {
+    final theme = Theme.of(context);
+    final isLlama = settings?.engineType == 'llama_cpp';
+    final modelPath = settings?.modelPath;
+    final activeModelName = modelPath != null && modelPath.isNotEmpty
+        ? modelPath.split('/').last
+        : null;
+
+    return Container(
+      width: double.infinity,
+      color: theme.colorScheme.surfaceContainerLow,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Icon(
+            isLlama ? Icons.memory_rounded : Icons.wifi_rounded,
+            size: 18,
+            color: activeModelName != null ? Colors.green : Colors.orange,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    const Text(
+                      "ACTIVE MODEL: ",
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: isLlama
+                            ? Colors.green.withOpacity(0.15)
+                            : Colors.blue.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        isLlama ? 'llama.cpp' : 'Ollama',
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: isLlama ? Colors.green : Colors.blue,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  activeModelName ?? "No model selected (Local Engine)",
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: activeModelName != null
+                        ? theme.colorScheme.onSurface
+                        : theme.colorScheme.error,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          if (activeModelName != null) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.green.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_circle_rounded,
+                      size: 12, color: Colors.green),
+                  SizedBox(width: 4),
+                  Text(
+                    "LOADED",
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -775,13 +920,74 @@ class _ModelsScreenState extends State<ModelsScreen>
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_downloadedFiles.isEmpty && activeDownloadingKeys.isEmpty) {
-      return const Center(child: Text('No downloaded .gguf models found.'));
-    }
-
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
+        // LOCAL IMPORT CALL-TO-ACTION CARD
+        Card(
+          elevation: 0,
+          color: theme.colorScheme.surfaceContainerHigh,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(
+              color: theme.colorScheme.outlineVariant.withOpacity(0.5),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.folder_open_rounded,
+                    color: theme.colorScheme.primary,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "Import Local GGUF File",
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        "Browse device storage for external GGUF models.",
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: () => _pickLocalGgufFile(settingsRepo),
+                  icon: const Icon(Icons.file_upload_outlined, size: 16),
+                  label: const Text("Browse", style: TextStyle(fontSize: 12)),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
         // Active In-Progress Downloads Section
         if (activeDownloadingKeys.isNotEmpty) ...[
           Padding(
@@ -874,7 +1080,7 @@ class _ModelsScreenState extends State<ModelsScreen>
           Padding(
             padding: const EdgeInsets.only(left: 4, bottom: 8, top: 4),
             child: Text(
-              "DOWNLOADED MODELS",
+              "OFFLINE GGUF MODELS (${_downloadedFiles.length})",
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
@@ -889,12 +1095,19 @@ class _ModelsScreenState extends State<ModelsScreen>
 
             return Card(
               margin: const EdgeInsets.only(bottom: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(
+                  color: isActive
+                      ? Colors.green.withOpacity(0.8)
+                      : theme.colorScheme.outlineVariant.withOpacity(0.3),
+                  width: isActive ? 2 : 1,
+                ),
+              ),
               child: ListTile(
                 leading: Icon(
                   Icons.memory_rounded,
-                  color: isActive
-                      ? Colors.green
-                      : theme.colorScheme.primary,
+                  color: isActive ? Colors.green : theme.colorScheme.primary,
                 ),
                 title: Text(
                   fileName,
@@ -910,9 +1123,16 @@ class _ModelsScreenState extends State<ModelsScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (!isActive)
-                      IconButton(
-                        tooltip: 'Set as Active Model',
-                        icon: const Icon(Icons.check_circle_outline_rounded),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        icon: const Icon(Icons.check_circle_outline_rounded,
+                            size: 14),
+                        label: const Text('Use', style: TextStyle(fontSize: 11)),
                         onPressed: () async {
                           if (LlamaCppAiService.loadedModelPath != null &&
                               LlamaCppAiService.loadedModelPath != file.path) {
@@ -929,19 +1149,28 @@ class _ModelsScreenState extends State<ModelsScreen>
                         },
                       )
                     else
-                      const Chip(
-                        label: Text(
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.green),
+                        ),
+                        child: const Text(
                           'ACTIVE',
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
+                            color: Colors.green,
                           ),
                         ),
-                        backgroundColor: Colors.greenAccent,
                       ),
+                    const SizedBox(width: 4),
                     IconButton(
                       tooltip: 'Delete File',
-                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                      icon: const Icon(Icons.delete_outline,
+                          color: Colors.red, size: 20),
                       onPressed: () async {
                         if (LlamaCppAiService.loadedModelPath == file.path) {
                           await LlamaCppAiService.unloadModel();
@@ -958,6 +1187,35 @@ class _ModelsScreenState extends State<ModelsScreen>
               ),
             );
           }),
+        ] else if (activeDownloadingKeys.isEmpty) ...[
+          const SizedBox(height: 32),
+          Center(
+            child: Column(
+              children: [
+                Icon(
+                  Icons.extension_off_outlined,
+                  size: 48,
+                  color: theme.colorScheme.outline,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'No local .gguf models found',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Import a local .gguf file using the button above\nor download from Recommended / Search HF tabs.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ],
     );
