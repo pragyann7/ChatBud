@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:chatbud/models/bud.dart';
 import 'package:chatbud/repositories/bud_repository.dart';
+import 'package:chatbud/screens/buds_screen.dart';
 import 'package:provider/provider.dart';
 
 class BudSelectorChip extends StatelessWidget {
@@ -45,8 +46,8 @@ class BudSelectorChip extends StatelessWidget {
       builder: (context) {
         return DraggableScrollableSheet(
           expand: false,
-          initialChildSize: 0.6,
-          maxChildSize: 0.85,
+          initialChildSize: 0.65,
+          maxChildSize: 0.9,
           minChildSize: 0.4,
           builder: (context, scrollController) {
             return Column(
@@ -63,17 +64,54 @@ class BudSelectorChip extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 20,
-                    vertical: 16,
+                    vertical: 14,
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.psychology_rounded, size: 24),
-                      const SizedBox(width: 12),
-                      Text(
-                        "Switch AI Persona (Bud)",
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primaryContainer,
+                          shape: BoxShape.circle,
                         ),
+                        child: Icon(
+                          Icons.psychology_rounded,
+                          size: 20,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "AI Persona (Bud)",
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            "Choose system prompt persona for this chat",
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: "Manage Personas",
+                        icon: const Icon(Icons.settings_outlined, size: 20),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const BudsScreen(),
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -92,85 +130,39 @@ class BudSelectorChip extends StatelessWidget {
 
                       return ListView(
                         controller: scrollController,
+                        padding: const EdgeInsets.all(12),
                         children: [
                           // "No Bud / Raw LLM" Option
-                          ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: activeBud == null
-                                  ? theme.colorScheme.primary
-                                  : theme.colorScheme.surfaceVariant,
-                              foregroundColor: activeBud == null
-                                  ? theme.colorScheme.onPrimary
-                                  : theme.colorScheme.onSurfaceVariant,
-                              child: const Icon(Icons.memory_rounded, size: 20),
-                            ),
-                            title: const Text(
-                              "No Bud / Raw LLM",
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            subtitle: Text(
-                              "Standard model completion without custom system prompt persona",
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                            trailing: activeBud == null
-                                ? Icon(
-                                    Icons.check_circle_rounded,
-                                    color: theme.colorScheme.primary,
-                                  )
-                                : null,
+                          _buildPersonaTile(
+                            context,
+                            title: "Raw LLM (No Persona)",
+                            subtitle:
+                                "Direct model completion without custom system instructions",
+                            icon: Icons.memory_rounded,
+                            isSelected: activeBud == null,
                             onTap: () {
                               onBudSelected(null);
                               Navigator.pop(context);
                             },
                           ),
-                          const Divider(height: 1, indent: 64),
+                          const SizedBox(height: 8),
 
                           // Dynamic Bud List
                           ...buds.map((bud) {
                             final isSelected = activeBud?.id == bud.id;
-                            return ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: isSelected
-                                    ? theme.colorScheme.primary
-                                    : theme.colorScheme.surfaceVariant,
-                                foregroundColor: isSelected
-                                    ? theme.colorScheme.onPrimary
-                                    : theme.colorScheme.onSurfaceVariant,
-                                child: Icon(
-                                  _getIconData(bud.iconName),
-                                  size: 20,
-                                ),
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: _buildPersonaTile(
+                                context,
+                                title: bud.name,
+                                subtitle: bud.systemPrompt,
+                                icon: _getIconData(bud.iconName),
+                                isSelected: isSelected,
+                                onTap: () {
+                                  onBudSelected(bud);
+                                  Navigator.pop(context);
+                                },
                               ),
-                              title: Text(
-                                bud.name,
-                                style: TextStyle(
-                                  fontWeight: isSelected
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
-                              ),
-                              subtitle: Text(
-                                bud.systemPrompt,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                              trailing: isSelected
-                                  ? Icon(
-                                      Icons.check_circle_rounded,
-                                      color: theme.colorScheme.primary,
-                                    )
-                                  : null,
-                              onTap: () {
-                                onBudSelected(bud);
-                                Navigator.pop(context);
-                              },
                             );
                           }),
                         ],
@@ -186,42 +178,159 @@ class BudSelectorChip extends StatelessWidget {
     );
   }
 
+  Widget _buildPersonaTile(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+
+    return Card(
+      elevation: isSelected ? 1 : 0,
+      color: isSelected
+          ? theme.colorScheme.primaryContainer.withOpacity(0.35)
+          : theme.colorScheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: isSelected
+              ? theme.colorScheme.primary
+              : theme.colorScheme.outlineVariant.withOpacity(0.4),
+          width: isSelected ? 1.5 : 1,
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.surfaceContainerHighest,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  icon,
+                  size: 20,
+                  color: isSelected
+                      ? theme.colorScheme.onPrimary
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight:
+                            isSelected ? FontWeight.bold : FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (isSelected) ...[
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.check_circle_rounded,
+                  color: theme.colorScheme.primary,
+                  size: 20,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final name = activeBud?.name ?? "No Bud (Raw LLM)";
+    final name = activeBud?.name ?? "Raw LLM";
     final icon = _getIconData(activeBud?.iconName);
+    final isBudActive = activeBud != null;
 
-    return ActionChip(
-      avatar: Icon(
-        icon,
-        size: 16,
-        color: activeBud != null
-            ? theme.colorScheme.primary
-            : theme.colorScheme.onSurfaceVariant,
-      ),
-      label: Text(
-        name,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          color: activeBud != null
-              ? theme.colorScheme.primary
-              : theme.colorScheme.onSurfaceVariant,
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () => _showBudSelectionSheet(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isBudActive
+              ? theme.colorScheme.primaryContainer.withOpacity(0.5)
+              : theme.colorScheme.surfaceContainerHighest.withOpacity(0.6),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isBudActive
+                ? theme.colorScheme.primary.withOpacity(0.4)
+                : theme.colorScheme.outlineVariant.withOpacity(0.5),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: isBudActive
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.surfaceContainerHighest,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                icon,
+                size: 13,
+                color: isBudActive
+                    ? theme.colorScheme.onPrimary
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              name,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: isBudActive
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurface,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.keyboard_arrow_down_rounded,
+              size: 16,
+              color: isBudActive
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.outline,
+            ),
+          ],
         ),
       ),
-      backgroundColor: activeBud != null
-          ? theme.colorScheme.primaryContainer.withOpacity(0.4)
-          : theme.colorScheme.surfaceVariant.withOpacity(0.5),
-      side: BorderSide(
-        color: activeBud != null
-            ? theme.colorScheme.primary.withOpacity(0.2)
-            : theme.colorScheme.outline.withOpacity(0.2),
-      ),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-      ),
-      onPressed: () => _showBudSelectionSheet(context),
     );
   }
 }

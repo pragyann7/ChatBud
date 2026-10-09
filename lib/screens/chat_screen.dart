@@ -9,13 +9,44 @@ import 'package:chatbud/repositories/bud_repository.dart';
 import 'package:chatbud/repositories/conversation_repository.dart';
 import 'package:chatbud/repositories/message_repository.dart';
 import 'package:chatbud/repositories/settings_repository.dart';
+import 'package:chatbud/screens/buds_screen.dart';
 import 'package:chatbud/screens/models_screen.dart';
+import 'package:chatbud/screens/settings_screen.dart';
 import 'package:chatbud/services/generation_manager.dart';
+import 'package:chatbud/services/huggingface_service.dart';
 import 'package:chatbud/services/llama_cpp_service.dart';
-import 'package:chatbud/widgets/bud_selector.dart';
 import 'package:chatbud/widgets/chat_input.dart';
 import 'package:chatbud/widgets/message_bubble.dart';
 import 'package:provider/provider.dart';
+
+// HELPER FUNCTION TO TRIM LONG MODEL NAMES
+String formatCleanModelName(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return "Qwen2.5-1.5B";
+  String name = raw.split('/').last.split('\\').last;
+  name = name.replaceAll(RegExp(r'\.gguf$', caseSensitive: false), '');
+
+  // Extract core model family & size e.g. qwen2.5-0.5b-instruct-q4_k_m -> Qwen2.5-0.5B
+  final qwenMatch = RegExp(r'(qwen2?\.?5?-[0-9\.]+[bm])', caseSensitive: false)
+      .firstMatch(name);
+  if (qwenMatch != null) {
+    String m = qwenMatch.group(1)!;
+    return m.substring(0, 1).toUpperCase() + m.substring(1);
+  }
+
+  final llamaMatch = RegExp(r'(llama-?[0-9\.]*-?[0-9\.]+[bm])', caseSensitive: false)
+      .firstMatch(name);
+  if (llamaMatch != null) {
+    String m = llamaMatch.group(1)!;
+    return m.substring(0, 1).toUpperCase() + m.substring(1);
+  }
+
+  name = name.replaceAll(
+      RegExp(r'(-instruct|-q\d+_\w+|_q\d+_\w+)', caseSensitive: false), '');
+  if (name.length > 15) {
+    name = "${name.substring(0, 14)}…";
+  }
+  return name;
+}
 
 class ChatScreen extends StatefulWidget {
   final Conversation? conversation;
@@ -28,10 +59,10 @@ class ChatScreen extends StatefulWidget {
   });
 
   @override
-  State<ChatScreen> createState() => _ChatScreenState();
+  State<ChatScreen> createState() => ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class ChatScreenState extends State<ChatScreen> {
   static const int _pageSize = 50;
 
   late ConversationRepository _conversationRepository;
@@ -48,9 +79,17 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isSubmitting = false;
   bool _isModelLoading = false;
 
+  // TTS Voice State
+  String _selectedVoice = 'Nova';
+  double _speakingCadence = 1.0;
+  double _pitchModulation = 1.2;
+  bool _isPlayingSample = false;
+
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   bool _showScrollToLatest = false;
+
+  final HuggingFaceService _hfService = HuggingFaceService();
 
   @override
   void initState() {
@@ -292,6 +331,7 @@ class _ChatScreenState extends State<ChatScreen> {
             content: Text(
               errorMessage ?? "Model loaded into RAM successfully!",
             ),
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -303,9 +343,939 @@ class _ChatScreenState extends State<ChatScreen> {
     if (mounted) {
       setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Model unloaded from RAM.")),
+        const SnackBar(
+          content: Text("Model unloaded from RAM."),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
     }
+  }
+
+  // 1. OPEN AI BUD & MODEL SHEET (References @bud&model-selection.png)
+  void openDropdownSheet() {
+    final theme = Theme.of(context);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1B1412),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (modalCtx) {
+        return StreamBuilder<AppSettings?>(
+          stream: _settingsRepository.watchSettings(),
+          builder: (context, snapshot) {
+            final settings = snapshot.data;
+            final modelPath = settings?.modelPath;
+            final cleanModel = formatCleanModelName(modelPath);
+
+            return DefaultTabController(
+              length: 2,
+              child: DraggableScrollableSheet(
+                expand: false,
+                initialChildSize: 0.78,
+                maxChildSize: 0.94,
+                minChildSize: 0.5,
+                builder: (context, scrollController) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 38,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.white24,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+
+                        // HEADER: AI Bud & Model
+                        Row(
+                          children: [
+                            const Text(
+                              "AI Bud & Model",
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                    color: Colors.green.withOpacity(0.5)),
+                              ),
+                              child: const Text(
+                                "• Ready • GGUF Edge",
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.greenAccent,
+                                ),
+                              ),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              icon: const Icon(Icons.close,
+                                  color: Colors.white70, size: 20),
+                              onPressed: () => Navigator.pop(modalCtx),
+                            ),
+                          ],
+                        ),
+
+                        Text(
+                          "⚡ 1.42 GB LPDDR5X  •  28.4 tok/s  •  Zero Cloud Latency",
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.orange.shade200,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+
+                        // ACTIVE SUMMARY CARD
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2B1D19),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.deepOrange.withOpacity(0.4),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.deepOrange.shade800,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Icon(
+                                  Icons.code_rounded,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      "${_activeBud?.name ?? 'Coding Bud'} • $cleanModel",
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    const Text(
+                                      "Dart, Rust & reactive low-latency architecture",
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.white60,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Text(
+                                  "• 986 MB",
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.greenAccent,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 14),
+
+                        // TAB BUTTONS
+                        Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF251A17),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          padding: const EdgeInsets.all(4),
+                          child: TabBar(
+                            indicator: BoxDecoration(
+                              color: const Color(0xFFFF5722),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            indicatorSize: TabBarIndicatorSize.tab,
+                            labelColor: Colors.white,
+                            unselectedLabelColor: Colors.white54,
+                            labelStyle: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            tabs: const [
+                              Tab(text: "🍱 AI Buds 3"),
+                              Tab(text: "🧠 GGUF Models 4"),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // TAB CONTENTS
+                        Expanded(
+                          child: TabBarView(
+                            children: [
+                              // TAB 1: AI BUDS
+                              StreamBuilder<List<Bud>>(
+                                stream: _budRepository.watchBuds(),
+                                builder: (context, snapshot) {
+                                  final buds = snapshot.data ?? [];
+                                  return ListView(
+                                    controller: scrollController,
+                                    children: [
+                                      _buildReferenceBudTile(
+                                        title: "Coding Bud",
+                                        subtitle:
+                                            "Temp 0.2 • Flutter, Rust, architecture",
+                                        icon: Icons.code_rounded,
+                                        isActive: _activeBud?.name == "Coding Bud" || _activeBud == null,
+                                        onTap: () {
+                                          if (buds.isNotEmpty) _onBudChanged(buds.first);
+                                        },
+                                      ),
+                                      const SizedBox(height: 8),
+                                      _buildReferenceBudTile(
+                                        title: "Teacher Bud",
+                                        subtitle:
+                                            "Socratic guidance & step-by-step breakdown • Temp 0.5",
+                                        icon: Icons.school_rounded,
+                                        isActive: _activeBud?.name == "Teacher Bud",
+                                        onTap: () {
+                                          if (buds.length > 1) _onBudChanged(buds[1]);
+                                        },
+                                      ),
+                                      const SizedBox(height: 8),
+                                      _buildReferenceBudTile(
+                                        title: "Writing Bud",
+                                        subtitle:
+                                            "Lyrical nuance, creative narratives & prose • Temp 0.85",
+                                        icon: Icons.palette_rounded,
+                                        isActive: _activeBud?.name == "Writing Bud",
+                                        onTap: () {
+                                          if (buds.length > 2) _onBudChanged(buds[2]);
+                                        },
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+
+                              // TAB 2: GGUF MODELS
+                              FutureBuilder<List<File>>(
+                                future: _hfService.getDownloadedGgufFiles(),
+                                builder: (context, snapshot) {
+                                  final files = snapshot.data ?? [];
+                                  if (files.isEmpty) {
+                                    return const Center(
+                                      child: Text(
+                                        "No offline GGUF files found",
+                                        style: TextStyle(color: Colors.white54),
+                                      ),
+                                    );
+                                  }
+                                  return ListView.builder(
+                                    controller: scrollController,
+                                    itemCount: files.length,
+                                    itemBuilder: (context, index) {
+                                      final file = files[index];
+                                      final rawName = file.path.split('/').last;
+                                      final clean = formatCleanModelName(rawName);
+                                      final isSelected = modelPath == file.path;
+
+                                      return Card(
+                                        margin: const EdgeInsets.only(bottom: 8),
+                                        color: const Color(0xFF251A17),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                          side: BorderSide(
+                                            color: isSelected
+                                                ? Colors.orange
+                                                : Colors.white10,
+                                          ),
+                                        ),
+                                        child: ListTile(
+                                          leading: const Icon(Icons.memory_rounded,
+                                              color: Colors.orange),
+                                          title: Text(clean,
+                                              style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 13)),
+                                          subtitle: Text(rawName,
+                                              style: const TextStyle(
+                                                  color: Colors.white38,
+                                                  fontSize: 10),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis),
+                                          trailing: isSelected
+                                              ? const Chip(
+                                                  label: Text("ACTIVE",
+                                                      style: TextStyle(
+                                                          fontSize: 9,
+                                                          color: Colors.white)),
+                                                  backgroundColor: Colors.orange,
+                                                )
+                                              : ElevatedButton(
+                                                  style: ElevatedButton.styleFrom(
+                                                    backgroundColor:
+                                                        Colors.deepOrange,
+                                                  ),
+                                                  onPressed: () async {
+                                                    await _settingsRepository
+                                                        .updateModelPath(file.path);
+                                                    _loadLocalGgufModel(file.path);
+                                                  },
+                                                  child: const Text("Load",
+                                                      style: TextStyle(
+                                                          fontSize: 11,
+                                                          color: Colors.white)),
+                                                ),
+                                        ),
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // BOTTOM BUTTONS
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFFFF6D3B),
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                                onPressed: () => Navigator.pop(modalCtx),
+                                icon: const Icon(Icons.check, color: Colors.white, size: 18),
+                                label: const Text(
+                                  "Apply to Chat",
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  side: const BorderSide(color: Colors.white24),
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                                onPressed: () {
+                                  Navigator.pop(modalCtx);
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => const ModelsScreen(),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.download_rounded, size: 18),
+                                label: const Text("Manage in Hub"),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildReferenceBudTile({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required bool isActive,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF251A17),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isActive ? Colors.deepOrange : Colors.white10,
+          width: isActive ? 1.5 : 1,
+        ),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: isActive ? Colors.deepOrange : Colors.white12,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: Colors.white, size: 18),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.white54,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isActive)
+              const Row(
+                children: [
+                  Icon(Icons.check, color: Colors.greenAccent, size: 16),
+                  SizedBox(width: 4),
+                  Text(
+                    "Active",
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.greenAccent,
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 2. OPEN VOICE SYNTHESIS & TTS SHEET (References @voice&TTS-selection.png)
+  void openTtsVoiceSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1B1412),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (modalCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 38,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // HEADER
+                  Row(
+                    children: [
+                      const Text(
+                        "Voice Synthesis & TTS",
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(10),
+                          border:
+                              Border.all(color: Colors.green.withOpacity(0.5)),
+                        ),
+                        child: const Text(
+                          "• Offline • ONNX",
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.greenAccent,
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close,
+                            color: Colors.white70, size: 20),
+                        onPressed: () => Navigator.pop(modalCtx),
+                      ),
+                    ],
+                  ),
+
+                  Text(
+                    "⚡ Piper / Sherpa-ONNX Engine  •  0ms Cloud Latency",
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.orange.shade200,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // PLAYING SAMPLE BAR
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2B1D19),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Colors.deepOrange.withOpacity(0.4),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          style: IconButton.styleFrom(
+                            backgroundColor: Colors.deepOrange,
+                          ),
+                          icon: Icon(
+                            _isPlayingSample
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                            color: Colors.white,
+                          ),
+                          onPressed: () {
+                            setSheetState(() {
+                              _isPlayingSample = !_isPlayingSample;
+                            });
+                          },
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    "Playing $_selectedVoice Sample",
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  const Text(
+                                    "22.05 kHz",
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.greenAccent,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              const Text(
+                                '"On-device LLMs run directly in memory ..."',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.white54,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // SOUND BARS EQUALIZER
+                        Row(
+                          children: [
+                            _buildSoundBar(18, _isPlayingSample),
+                            const SizedBox(width: 2),
+                            _buildSoundBar(24, _isPlayingSample),
+                            const SizedBox(width: 2),
+                            _buildSoundBar(14, _isPlayingSample),
+                            const SizedBox(width: 2),
+                            _buildSoundBar(20, _isPlayingSample),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+                  const Row(
+                    children: [
+                      Text(
+                        "INSTALLED LOCAL VOICES",
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.8,
+                          color: Colors.white54,
+                        ),
+                      ),
+                      Spacer(),
+                      Text(
+                        "4 READY",
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.greenAccent,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+
+                  // VOICES LIST
+                  _buildVoiceTile(
+                    name: "Nova",
+                    tag: "Recommended",
+                    desc: "Warm & Articulate • Tuned for code explanation",
+                    meta: "EN-US  •  Piper 42 MB  •  18ms Latency",
+                    isSelected: _selectedVoice == "Nova",
+                    onTap: () => setSheetState(() => _selectedVoice = "Nova"),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildVoiceTile(
+                    name: "Atlas",
+                    tag: "Deep Pitch",
+                    desc: "Crisp & Technical • Low pitch, clear cadence",
+                    meta: "EN-US  •  Sherpa 38 MB  •  15ms Latency",
+                    isSelected: _selectedVoice == "Atlas",
+                    onTap: () => setSheetState(() => _selectedVoice = "Atlas"),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // CADENCE & PITCH CONTROLS
+                  Row(
+                    children: [
+                      const Text(
+                        "Speaking Cadence:",
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.white70,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Spacer(),
+                      Wrap(
+                        spacing: 6,
+                        children: [0.8, 1.0, 1.2, 1.5].map((speed) {
+                          final isSel = _speakingCadence == speed;
+                          return InkWell(
+                            onTap: () {
+                              setSheetState(() => _speakingCadence = speed);
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isSel
+                                    ? Colors.deepOrange
+                                    : const Color(0xFF251A17),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: isSel
+                                      ? Colors.orange
+                                      : Colors.white12,
+                                ),
+                              ),
+                              child: Text(
+                                "${speed}x",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: isSel ? Colors.white : Colors.white60,
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Text(
+                        "Pitch Modulation:",
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.white70,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Spacer(),
+                      const Text(
+                        "Flat",
+                        style: TextStyle(fontSize: 10, color: Colors.white38),
+                      ),
+                      Expanded(
+                        child: Slider(
+                          value: _pitchModulation,
+                          min: 0.5,
+                          max: 2.0,
+                          activeColor: Colors.deepOrange,
+                          onChanged: (val) {
+                            setSheetState(() => _pitchModulation = val);
+                          },
+                        ),
+                      ),
+                      Text(
+                        "+${_pitchModulation.toStringAsFixed(1)}",
+                        style: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.orangeAccent,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // BOTTOM BUTTONS
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFFF6D3B),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          onPressed: () {
+                            Navigator.pop(modalCtx);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text("Default Voice set to $_selectedVoice"),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.check,
+                              color: Colors.white, size: 18),
+                          label: const Text(
+                            "Set Default Voice",
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white24),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          onPressed: () {
+                            Navigator.pop(modalCtx);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const ModelsScreen(),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.download_rounded, size: 18),
+                          label: const Text("Download Voices"),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildSoundBar(double height, bool active) {
+    return Container(
+      width: 3,
+      height: active ? height : 6,
+      decoration: BoxDecoration(
+        color: active ? Colors.orangeAccent : Colors.white24,
+        borderRadius: BorderRadius.circular(2),
+      ),
+    );
+  }
+
+  Widget _buildVoiceTile({
+    required String name,
+    required String tag,
+    required String desc,
+    required String meta,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF251A17),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isSelected ? Colors.deepOrange : Colors.white10,
+          width: isSelected ? 1.5 : 1,
+        ),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.deepOrange : Colors.white12,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.record_voice_over_rounded,
+                  color: Colors.white, size: 18),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.deepOrange.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          tag,
+                          style: TextStyle(
+                            fontSize: 9,
+                            color: Colors.orange.shade200,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      if (isSelected)
+                        const Text(
+                          "✓ Selected",
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.greenAccent,
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    desc,
+                    style: const TextStyle(fontSize: 11, color: Colors.white70),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    meta,
+                    style: const TextStyle(
+                      fontSize: 9,
+                      color: Colors.white38,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _retryMessage(Message failedAssistantMessage) async {
@@ -550,184 +1520,20 @@ class _ChatScreenState extends State<ChatScreen> {
 
     return Column(
       children: [
-        // Bud Selector Header Bar
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          alignment: Alignment.centerLeft,
-          color: Theme.of(context).colorScheme.surface,
-          child: Row(
-            children: [
-              BudSelectorChip(
-                activeBud: _activeBud,
-                onBudSelected: _onBudChanged,
-              ),
-              const Spacer(),
-            ],
-          ),
-        ),
-        // llama.cpp On-Device Model Status Bar
-        StreamBuilder<AppSettings?>(
-          stream: _settingsRepository.watchSettings(),
-          builder: (context, snapshot) {
-            final settings = snapshot.data;
-            if (settings?.engineType != 'llama_cpp') {
-              return const SizedBox.shrink();
-            }
-
-            final modelPath = settings?.modelPath;
-            final isLoaded = LlamaCppAiService.isModelLoaded;
-            final fileName = modelPath != null
-                ? modelPath.split('/').last
-                : null;
-
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              color: Theme.of(context)
-                  .colorScheme
-                  .surfaceContainerHighest
-                  .withOpacity(0.5),
-              child: Row(
-                children: [
-                  Icon(
-                    isLoaded ? Icons.bolt_rounded : Icons.memory_rounded,
-                    size: 16,
-                    color: isLoaded
-                        ? Colors.green
-                        : Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      isLoaded
-                          ? "Loaded: ${fileName ?? 'Model'} (RAM Active)"
-                          : (fileName != null
-                              ? "Model Ready: $fileName"
-                              : "No Model Loaded"),
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: isLoaded
-                            ? Colors.green
-                            : Theme.of(context).colorScheme.primary,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (_isModelLoading)
-                    const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  else if (isLoaded)
-                    TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      onPressed: _unloadLocalGgufModel,
-                      child: const Text(
-                        "Unload RAM",
-                        style: TextStyle(fontSize: 11),
-                      ),
-                    )
-                  else if (fileName != null)
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      onPressed: () => _loadLocalGgufModel(modelPath!),
-                      icon: const Icon(Icons.bolt_rounded, size: 14),
-                      label: const Text(
-                        "Load Model",
-                        style: TextStyle(fontSize: 11),
-                      ),
-                    )
-                  else
-                    TextButton.icon(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      onPressed: _showModelRequiredDialog,
-                      icon: const Icon(Icons.memory_rounded, size: 14),
-                      label: const Text(
-                        "Models",
-                        style: TextStyle(fontSize: 11),
-                      ),
-                    ),
-                ],
-              ),
-            );
-          },
-        ),
-        const Divider(height: 1),
         Expanded(
           child: Stack(
             children: [
               if (_messages.isEmpty)
-                Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        "Ready. Offline. Yours.",
-                        style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        "Active Mode: ${_activeBud?.name ?? 'No Bud (Raw LLM)'}",
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).colorScheme.secondary,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 16),
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const ModelsScreen(),
-                            ),
-                          );
-                        },
-                        icon: const Icon(
-                          Icons.memory_rounded,
-                          size: 18,
-                        ),
-                        label: const Text("Models"),
-                      ),
-                    ],
-                  ),
-                )
+                _buildEmptyStateView(context)
               else
                 ListView.builder(
                   controller: _scrollController,
                   reverse: true,
-                  itemCount: _messages.length + (_isLoadingOlderMessages ? 1 : 0),
+                  itemCount:
+                      _messages.length + (_isLoadingOlderMessages ? 1 : 0),
                   itemBuilder: (context, index) {
-                    if (_isLoadingOlderMessages && index == _messages.length) {
+                    if (_isLoadingOlderMessages &&
+                        index == _messages.length) {
                       return const Padding(
                         padding: EdgeInsets.symmetric(vertical: 12),
                         child: Center(
@@ -741,8 +1547,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     }
 
                     final message = _messages[_messages.length - 1 - index];
-                    final isLatestMessage =
-                        _messages.isNotEmpty && _messages.last.id == message.id;
+                    final isLatestMessage = _messages.isNotEmpty &&
+                        _messages.last.id == message.id;
 
                     final activeNotifier = _currentConversation != null
                         ? genManager.getNotifier(
@@ -781,6 +1587,90 @@ class _ChatScreenState extends State<ChatScreen> {
           onAddAttachment: () {},
         ),
       ],
+    );
+  }
+
+  // MODERN EMPTY CHAT HERO STATE
+  Widget _buildEmptyStateView(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer.withOpacity(0.4),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.chat_bubble_outline_rounded,
+                size: 40,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              "ChatBud • Offline AI",
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              "Private • On-Device • Uncensored Intelligence",
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 20),
+            InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: openDropdownSheet,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: theme.colorScheme.outlineVariant.withOpacity(0.5),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.tune_rounded,
+                      size: 16,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      "Chat & Model Settings",
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.arrow_drop_down_rounded,
+                      size: 18,
+                      color: theme.colorScheme.outline,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
