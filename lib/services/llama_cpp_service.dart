@@ -27,10 +27,13 @@ class LlamaCppAiService implements AiService {
   static const Duration defaultKeepAliveDuration = Duration(minutes: 5);
   static Timer? _inactivityTimer;
 
-  static final ValueNotifier<bool> isModelLoadingNotifier = ValueNotifier<bool>(false);
-  static final ValueNotifier<bool> isModelLoadedNotifier = ValueNotifier<bool>(false);
+  static final ValueNotifier<bool> isModelLoadingNotifier =
+      ValueNotifier<bool>(false);
+  static final ValueNotifier<bool> isModelLoadedNotifier =
+      ValueNotifier<bool>(false);
 
-  static bool get isModelLoading => _loading != null || isModelLoadingNotifier.value;
+  static bool get isModelLoading =>
+      _loading != null || isModelLoadingNotifier.value;
   static bool get isModelLoaded => _engine != null;
   static String? get loadedModelPath => _loadedModelPath;
 
@@ -84,19 +87,17 @@ class LlamaCppAiService implements AiService {
       }
 
       // On Android the package's native-assets hook puts the CPU llama.cpp
-      // runtime in the APK. Passing libmtmd.so here bypassed that packaging and
-      // failed because that standalone library was never shipped by 0.2.x.
+      // runtime in the APK.
       final engine = await LlamaEngine.spawn(
         modelParams: ModelParams(path: normalizedPath),
-        contextParams:
-            ContextParams.mobile(
-              nCtx: contextSize.clamp(256, 131072),
-              nBatch: batchSize.clamp(32, 4096),
-              nUbatch: batchSize.clamp(32, 4096),
-            ).copyWith(
-              nThreads: cpuThreads.clamp(1, 64),
-              nThreadsBatch: cpuThreads.clamp(1, 64),
-            ),
+        contextParams: ContextParams.mobile(
+          nCtx: contextSize.clamp(256, 131072),
+          nBatch: batchSize.clamp(32, 4096),
+          nUbatch: batchSize.clamp(32, 4096),
+        ).copyWith(
+          nThreads: cpuThreads.clamp(1, 64),
+          nThreadsBatch: cpuThreads.clamp(1, 64),
+        ),
       ).timeout(const Duration(minutes: 3));
 
       _engine = engine;
@@ -207,63 +208,163 @@ class LlamaCppAiService implements AiService {
     final output = StreamController<String>();
     _activeOutput = output;
     _cancelInactivityTimer();
+
     EngineChat? chat;
+    EngineSession? session;
+
     try {
-      chat = await _engine!.createChat();
-      if (systemPrompt != null && systemPrompt.trim().isNotEmpty) {
-        chat.addSystem(systemPrompt.trim());
+      // TIER 1: Native EngineChat Template
+      try {
+        chat = await _engine!.createChat();
+      } catch (chatError) {
+        debugPrint(
+            'Engine.createChat failed ($chatError), falling back to EngineSession');
       }
 
-      final history = (conversationHistory ?? const <Message>[]).where(
-        (message) =>
-            message.text.isNotEmpty &&
-            message.status != MessageStatus.failed &&
-            message.status != MessageStatus.pending,
-      );
-      var includesCurrentPrompt = false;
-      for (final message in history) {
-        if (message.isUser) {
-          chat.addUser(message.text);
-          if (message.text == prompt) includesCurrentPrompt = true;
-        } else {
-          chat.addAssistant(message.text);
+      if (chat != null) {
+        bool systemAdded = false;
+        if (systemPrompt != null && systemPrompt.trim().isNotEmpty) {
+          try {
+            chat.addSystem(systemPrompt.trim());
+            systemAdded = true;
+          } catch (e) {
+            debugPrint(
+                "Model template does not support system role, prepending to user prompt: $e");
+            systemAdded = false;
+          }
         }
-      }
-      if (!includesCurrentPrompt) chat.addUser(prompt);
 
-      _activeGeneration = chat
-          .generate(
-            sampler: const SamplerParams(temperature: 0.7, topK: 40, topP: 0.9),
-            maxTokens: 1024,
-          )
-          .listen(
-            (event) {
-              if (event case TokenEvent(:final text) when text.isNotEmpty) {
-                if (!output.isClosed) output.add(text);
-              } else if (event case DoneEvent(:final trailingText)
-                  when trailingText.isNotEmpty) {
-                if (!output.isClosed) output.add(trailingText);
-              }
-            },
-            onError: (Object error, StackTrace stack) {
-              if (!output.isClosed) {
-                output.addError(
-                  AiServiceException('Local inference failed: $error'),
-                  stack,
-                );
-                output.close();
-              }
-            },
-            onDone: () {
-              if (!output.isClosed) output.close();
-            },
-          );
+        final history = (conversationHistory ?? const <Message>[]).where(
+          (message) =>
+              message.text.isNotEmpty &&
+              message.status != MessageStatus.failed &&
+              message.status != MessageStatus.pending,
+        );
+        var includesCurrentPrompt = false;
+        for (final message in history) {
+          if (message.isUser) {
+            String userText = message.text;
+            if (!systemAdded &&
+                systemPrompt != null &&
+                systemPrompt.trim().isNotEmpty) {
+              userText =
+                  "System Instruction: ${systemPrompt.trim()}\n\n$userText";
+              systemAdded = true;
+            }
+            chat.addUser(userText);
+            if (message.text == prompt) includesCurrentPrompt = true;
+          } else {
+            chat.addAssistant(message.text);
+          }
+        }
+        if (!includesCurrentPrompt) {
+          String userText = prompt;
+          if (!systemAdded &&
+              systemPrompt != null &&
+              systemPrompt.trim().isNotEmpty) {
+            userText =
+                "System Instruction: ${systemPrompt.trim()}\n\n$userText";
+            systemAdded = true;
+          }
+          chat.addUser(userText);
+        }
+
+        _activeGeneration = chat
+            .generate(
+              sampler:
+                  const SamplerParams(temperature: 0.7, topK: 40, topP: 0.9),
+              maxTokens: 1024,
+            )
+            .listen(
+              (event) {
+                if (event case TokenEvent(:final text) when text.isNotEmpty) {
+                  if (!output.isClosed) output.add(text);
+                } else if (event case DoneEvent(:final trailingText)
+                    when trailingText.isNotEmpty) {
+                  if (!output.isClosed) output.add(trailingText);
+                }
+              },
+              onError: (Object error, StackTrace stack) {
+                if (!output.isClosed) {
+                  output.addError(
+                    AiServiceException('Local inference failed: $error'),
+                    stack,
+                  );
+                  output.close();
+                }
+              },
+              onDone: () {
+                if (!output.isClosed) output.close();
+              },
+            );
+      } else {
+        // TIER 2: EngineSession Turn-Based Fallback
+        session = await _engine!.createSession();
+        final StringBuffer fullPrompt = StringBuffer();
+        if (systemPrompt != null && systemPrompt.trim().isNotEmpty) {
+          fullPrompt.writeln(
+              "<start_of_turn>system\n${systemPrompt.trim()}<end_of_turn>");
+        }
+        final history = (conversationHistory ?? const <Message>[]).where(
+          (message) =>
+              message.text.isNotEmpty &&
+              message.status != MessageStatus.failed &&
+              message.status != MessageStatus.pending,
+        );
+        var includesCurrentPrompt = false;
+        for (final message in history) {
+          if (message.isUser) {
+            fullPrompt.writeln(
+                "<start_of_turn>user\n${message.text}<end_of_turn>");
+            if (message.text == prompt) includesCurrentPrompt = true;
+          } else {
+            fullPrompt.writeln(
+                "<start_of_turn>model\n${message.text}<end_of_turn>");
+          }
+        }
+        if (!includesCurrentPrompt) {
+          fullPrompt.writeln("<start_of_turn>user\n$prompt<end_of_turn>");
+        }
+        fullPrompt.write("<start_of_turn>model\n");
+
+        _activeGeneration = session
+            .generate(
+              prompt: fullPrompt.toString(),
+              sampler:
+                  const SamplerParams(temperature: 0.7, topK: 40, topP: 0.9),
+              maxTokens: 1024,
+            )
+            .listen(
+              (event) {
+                if (event case TokenEvent(:final text) when text.isNotEmpty) {
+                  if (!output.isClosed) output.add(text);
+                } else if (event case DoneEvent(:final trailingText)
+                    when trailingText.isNotEmpty) {
+                  if (!output.isClosed) output.add(trailingText);
+                }
+              },
+              onError: (Object error, StackTrace stack) {
+                if (!output.isClosed) {
+                  output.addError(
+                    AiServiceException('Local inference failed: $error'),
+                    stack,
+                  );
+                  output.close();
+                }
+              },
+              onDone: () {
+                if (!output.isClosed) output.close();
+              },
+            );
+      }
+
       yield* output.stream;
     } finally {
       final generation = _activeGeneration;
       _activeGeneration = null;
       if (generation != null) await generation.cancel();
       await chat?.dispose();
+      await session?.dispose();
       if (!output.isClosed) await output.close();
       if (identical(_activeOutput, output)) _activeOutput = null;
       if (isModelLoaded) {

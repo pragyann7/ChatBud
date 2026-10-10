@@ -112,7 +112,8 @@ class MessageRepository {
         .filter()
         .conversationIdEqualTo(conversationId)
         .sortByCreatedAt()
-        .watch(fireImmediately: true);
+        .watch(fireImmediately: true)
+        .asBroadcastStream();
   }
 
   Future<void> deleteMessagesForConversation(int conversationId) async {

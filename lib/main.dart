@@ -158,14 +158,12 @@ class _MyHomePageState extends State<MyHomePage> {
       GlobalKey<ChatScreenState>();
 
   Conversation? _activeConversation;
-  int _screenKey = -1;
 
   void _startNewChat() {
     if (_activeConversation == null) return;
 
     setState(() {
       _activeConversation = null;
-      _screenKey = DateTime.now().microsecondsSinceEpoch;
     });
   }
 
@@ -173,7 +171,6 @@ class _MyHomePageState extends State<MyHomePage> {
     context.read<GenerationManager>().markConversationAsRead(conversation.id);
     setState(() {
       _activeConversation = conversation;
-      _screenKey = conversation.id;
     });
   }
 
@@ -193,7 +190,6 @@ class _MyHomePageState extends State<MyHomePage> {
     if (_activeConversation?.id == conversation.id) {
       setState(() {
         _activeConversation = null;
-        _screenKey = DateTime.now().microsecondsSinceEpoch;
       });
     }
   }
@@ -210,11 +206,19 @@ class _MyHomePageState extends State<MyHomePage> {
 
     return Scaffold(
       drawerEdgeDragWidth: MediaQuery.of(context).size.width,
+      onDrawerChanged: (isOpen) {
+        if (isOpen) {
+          FocusManager.instance.primaryFocus?.unfocus();
+        }
+      },
       appBar: AppBar(
         leading: Builder(
           builder: (context) => IconButton(
             icon: const Icon(Icons.menu_rounded),
-            onPressed: () => Scaffold.of(context).openDrawer(),
+            onPressed: () {
+              FocusManager.instance.primaryFocus?.unfocus();
+              Scaffold.of(context).openDrawer();
+            },
           ),
         ),
         title: StreamBuilder<AppSettings?>(
@@ -228,6 +232,7 @@ class _MyHomePageState extends State<MyHomePage> {
             return InkWell(
               borderRadius: BorderRadius.circular(12),
               onTap: () {
+                FocusManager.instance.primaryFocus?.unfocus();
                 _chatScreenKey.currentState?.openDropdownSheet();
               },
               child: Padding(
@@ -286,14 +291,18 @@ class _MyHomePageState extends State<MyHomePage> {
                             ),
                           ),
                           const SizedBox(width: 6),
-                          Text(
-                            isLlama
-                                ? "• $cleanModelName • RAM Active"
-                                : "• Ollama Network",
-                            style: const TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.green,
+                          Flexible(
+                            child: Text(
+                              isLlama
+                                  ? cleanModelName
+                                  : "Ollama Network",
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           const SizedBox(width: 4),
@@ -317,19 +326,24 @@ class _MyHomePageState extends State<MyHomePage> {
             tooltip: "Voice Synthesis & TTS",
             icon: const Icon(Icons.volume_up_outlined),
             onPressed: () {
+              FocusManager.instance.primaryFocus?.unfocus();
               _chatScreenKey.currentState?.openTtsVoiceSheet();
             },
           ),
           // NEW CHAT ICON
           IconButton(
             tooltip: "New Chat",
-            onPressed: _startNewChat,
+            onPressed: () {
+              FocusManager.instance.primaryFocus?.unfocus();
+              _startNewChat();
+            },
             icon: const Icon(Icons.edit_note),
           ),
           // 3-DOT SETTING ICON -> OPENS AI BUD & MODEL SHEET
           IconButton(
             tooltip: "Chat Setting",
             onPressed: () {
+              FocusManager.instance.primaryFocus?.unfocus();
               _chatScreenKey.currentState?.openDropdownSheet();
             },
             icon: const Icon(Icons.more_vert_rounded),
@@ -343,9 +357,7 @@ class _MyHomePageState extends State<MyHomePage> {
         onDeleteConversation: _deleteConversation,
       ),
       body: ChatScreen(
-        key: _screenKey == -1
-            ? _chatScreenKey
-            : ValueKey("chat_$_screenKey"),
+        key: _chatScreenKey,
         conversation: _activeConversation,
         onConversationCreated: _onConversationCreated,
       ),
@@ -367,9 +379,184 @@ class AppDrawer extends StatelessWidget {
     required this.onDeleteConversation,
   });
 
+  void _showConversationOptionsMenu(
+      BuildContext context, Conversation conversation) {
+    final conversationRepo = context.read<ConversationRepository>();
+    final theme = Theme.of(context);
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (modalCtx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.outlineVariant,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          conversation.title,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (conversation.isPinned) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.push_pin_rounded,
+                                size: 12,
+                                color: theme.colorScheme.primary,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                "PINNED",
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const Divider(height: 16),
+                ListTile(
+                  leading: Icon(
+                    conversation.isPinned
+                        ? Icons.push_pin_outlined
+                        : Icons.push_pin_rounded,
+                    color: theme.colorScheme.primary,
+                  ),
+                  title: Text(
+                    conversation.isPinned
+                        ? "Unpin Conversation"
+                        : "Pin Conversation",
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  onTap: () {
+                    Navigator.pop(modalCtx);
+                    conversationRepo.togglePinConversation(conversation);
+                  },
+                ),
+                ListTile(
+                  leading: Icon(
+                    Icons.edit_outlined,
+                    color: theme.colorScheme.primary,
+                  ),
+                  title: const Text(
+                    "Rename Conversation",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  onTap: () {
+                    Navigator.pop(modalCtx);
+                    _showRenameDialog(context, conversation);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: Colors.red,
+                  ),
+                  title: const Text(
+                    "Delete Conversation",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red,
+                    ),
+                  ),
+                  onTap: () {
+                    Navigator.pop(modalCtx);
+                    onDeleteConversation(conversation);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showRenameDialog(BuildContext context, Conversation conversation) {
+    final conversationRepo = context.read<ConversationRepository>();
+    final textController = TextEditingController(text: conversation.title);
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          title: const Text("Rename Conversation"),
+          content: TextField(
+            controller: textController,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: "Chat Title",
+              border: OutlineInputBorder(),
+            ),
+            textCapitalization: TextCapitalization.sentences,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text("Cancel"),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final newTitle = textController.text.trim();
+                if (newTitle.isNotEmpty) {
+                  await conversationRepo.renameConversation(
+                      conversation, newTitle);
+                }
+                if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+              },
+              child: const Text("Save"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final conversationRepo = context.read<ConversationRepository>();
+    final theme = Theme.of(context);
 
     return Drawer(
       child: SafeArea(
@@ -487,6 +674,17 @@ class AppDrawer extends StatelessWidget {
 
                       return ListTile(
                         selected: isSelected,
+                        leading: Icon(
+                          conversation.isPinned
+                              ? Icons.push_pin_rounded
+                              : Icons.chat_bubble_outline_rounded,
+                          size: 20,
+                          color: isSelected
+                              ? theme.colorScheme.primary
+                              : (conversation.isPinned
+                                  ? theme.colorScheme.primary
+                                  : theme.colorScheme.onSurfaceVariant),
+                        ),
                         title: Text(
                           conversation.title,
                           maxLines: 1,
@@ -497,19 +695,12 @@ class AppDrawer extends StatelessWidget {
                                 : FontWeight.normal,
                           ),
                         ),
-                        trailing: IconButton(
-                          icon: const Icon(
-                            Icons.delete_outline,
-                            size: 20,
-                            color: Colors.grey,
-                          ),
-                          onPressed: () {
-                            onDeleteConversation(conversation);
-                          },
-                        ),
                         onTap: () {
                           Navigator.pop(context);
                           onSelectConversation(conversation);
+                        },
+                        onLongPress: () {
+                          _showConversationOptionsMenu(context, conversation);
                         },
                       );
                     },

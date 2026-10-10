@@ -6,6 +6,7 @@ class ChatInput extends StatelessWidget {
     required this.controller,
     required this.isGenerating,
     required this.onSend,
+    this.focusNode,
     this.onStop,
     this.onAddAttachment,
     this.enabled = true,
@@ -15,6 +16,7 @@ class ChatInput extends StatelessWidget {
   final TextEditingController controller;
   final bool isGenerating;
   final VoidCallback onSend;
+  final FocusNode? focusNode;
   final VoidCallback? onStop;
   final VoidCallback? onAddAttachment;
   final bool enabled;
@@ -47,9 +49,11 @@ class ChatInput extends StatelessWidget {
             children: [
               TextField(
                 controller: controller,
-                enabled: enabled, // Disabled when model is not loaded (PocketPal style)
+                focusNode: focusNode,
+                autofocus: false,
+                enabled: enabled,
                 minLines: 1,
-                maxLines: 11, // Expands up to 7 lines then becomes scrollable
+                maxLines: 11,
                 keyboardType: TextInputType.multiline,
                 textInputAction: TextInputAction.newline,
                 style: theme.textTheme.bodyMedium?.copyWith(

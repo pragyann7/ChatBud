@@ -78,6 +78,7 @@ class ConversationRepository {
         .where()
         .sortByIsPinnedDesc()
         .thenByUpdatedAtDesc()
-        .watch(fireImmediately: true);
+        .watch(fireImmediately: true)
+        .asBroadcastStream();
   }
 }

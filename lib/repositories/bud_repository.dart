@@ -57,7 +57,10 @@ class BudRepository {
   }
 
   Stream<List<Bud>> watchBuds() {
-    return isar.buds.where().watch(fireImmediately: true);
+    return isar.buds
+        .where()
+        .watch(fireImmediately: true)
+        .asBroadcastStream();
   }
 
   Future<Bud?> getBud(int id) async {
