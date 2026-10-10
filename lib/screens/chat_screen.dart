@@ -25,7 +25,6 @@ String formatCleanModelName(String? raw) {
   String name = raw.split('/').last.split('\\').last;
   name = name.replaceAll(RegExp(r'\.gguf$', caseSensitive: false), '');
 
-  // Extract core model family & size e.g. qwen2.5-0.5b-instruct-q4_k_m -> Qwen2.5-0.5B
   final qwenMatch = RegExp(r'(qwen2?\.?5?-[0-9\.]+[bm])', caseSensitive: false)
       .firstMatch(name);
   if (qwenMatch != null) {
@@ -42,8 +41,8 @@ String formatCleanModelName(String? raw) {
 
   name = name.replaceAll(
       RegExp(r'(-instruct|-q\d+_\w+|_q\d+_\w+)', caseSensitive: false), '');
-  if (name.length > 15) {
-    name = "${name.substring(0, 14)}…";
+  if (name.length > 13) {
+    name = "${name.substring(0, 12)}…";
   }
   return name;
 }
@@ -86,6 +85,7 @@ class ChatScreenState extends State<ChatScreen> {
   bool _isPlayingSample = false;
 
   final TextEditingController _textController = TextEditingController();
+  final FocusNode _inputFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
   bool _showScrollToLatest = false;
 
@@ -105,6 +105,19 @@ class ChatScreenState extends State<ChatScreen> {
       _messageRepository = context.read<MessageRepository>();
       _budRepository = context.read<BudRepository>();
       _settingsRepository = context.read<SettingsRepository>();
+      _loadActiveConversationAndMessages();
+    }
+  }
+
+  @override
+  void didUpdateWidget(ChatScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.conversation?.id != oldWidget.conversation?.id) {
+      setState(() {
+        _currentConversation = widget.conversation;
+        _messages = [];
+        _isLoading = true;
+      });
       _loadActiveConversationAndMessages();
     }
   }
@@ -351,16 +364,39 @@ class ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // 1. OPEN AI BUD & MODEL SHEET (References @bud&model-selection.png)
+  IconData _getBudIconData(String? iconName) {
+    if (iconName == null) return Icons.smart_toy_rounded;
+    switch (iconName) {
+      case 'code':
+        return Icons.code_rounded;
+      case 'school':
+        return Icons.school_rounded;
+      case 'palette':
+        return Icons.palette_rounded;
+      case 'psychology':
+        return Icons.psychology_rounded;
+      case 'terminal':
+        return Icons.terminal_rounded;
+      case 'smart_toy':
+      default:
+        return Icons.smart_toy_rounded;
+    }
+  }
+
+  // 1. OPEN AI BUD & MODEL SHEET (Dynamic Data + App Color Palette Match)
   void openDropdownSheet() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    FocusScope.of(context).unfocus();
+    _inputFocusNode.unfocus();
+
     final theme = Theme.of(context);
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF1B1412),
+      backgroundColor: theme.colorScheme.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (modalCtx) {
         return StreamBuilder<AppSettings?>(
@@ -368,398 +404,361 @@ class ChatScreenState extends State<ChatScreen> {
           builder: (context, snapshot) {
             final settings = snapshot.data;
             final modelPath = settings?.modelPath;
-            final cleanModel = formatCleanModelName(modelPath);
 
-            return DefaultTabController(
-              length: 2,
-              child: DraggableScrollableSheet(
-                expand: false,
-                initialChildSize: 0.78,
-                maxChildSize: 0.94,
-                minChildSize: 0.5,
-                builder: (context, scrollController) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Center(
-                          child: Container(
-                            width: 38,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: Colors.white24,
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 14),
+            return StreamBuilder<List<Bud>>(
+              stream: _budRepository.watchBuds(),
+              builder: (context, budSnapshot) {
+                final buds = budSnapshot.data ?? [];
 
-                        // HEADER: AI Bud & Model
-                        Row(
-                          children: [
-                            const Text(
-                              "AI Bud & Model",
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.green.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                    color: Colors.green.withOpacity(0.5)),
-                              ),
-                              child: const Text(
-                                "• Ready • GGUF Edge",
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.greenAccent,
+                return FutureBuilder<List<File>>(
+                  future: _hfService.getDownloadedGgufFiles(),
+                  builder: (context, modelSnapshot) {
+                    final files = modelSnapshot.data ?? [];
+
+                    return DefaultTabController(
+                      length: 2,
+                      child: DraggableScrollableSheet(
+                        expand: false,
+                        initialChildSize: 0.65,
+                        maxChildSize: 0.90,
+                        minChildSize: 0.45,
+                        builder: (context, scrollController) {
+                          return Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Drag handle
+                                Center(
+                                  child: Container(
+                                    width: 36,
+                                    height: 4,
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.outlineVariant,
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                            const Spacer(),
-                            IconButton(
-                              icon: const Icon(Icons.close,
-                                  color: Colors.white70, size: 20),
-                              onPressed: () => Navigator.pop(modalCtx),
-                            ),
-                          ],
-                        ),
+                                const SizedBox(height: 14),
 
-                        Text(
-                          "⚡ 1.42 GB LPDDR5X  •  28.4 tok/s  •  Zero Cloud Latency",
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.orange.shade200,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-
-                        // ACTIVE SUMMARY CARD
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF2B1D19),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: Colors.deepOrange.withOpacity(0.4),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: Colors.deepOrange.shade800,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: const Icon(
-                                  Icons.code_rounded,
-                                  color: Colors.white,
-                                  size: 20,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      "${_activeBud?.name ?? 'Coding Bud'} • $cleanModel",
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
+                                // TAB BUTTONS
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: theme.colorScheme.surfaceContainerHigh,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  padding: const EdgeInsets.all(4),
+                                  child: TabBar(
+                                    indicator: BoxDecoration(
+                                      color: theme.colorScheme.primaryContainer,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: theme.colorScheme.primary
+                                            .withOpacity(0.3),
                                       ),
                                     ),
-                                    const SizedBox(height: 2),
-                                    const Text(
-                                      "Dart, Rust & reactive low-latency architecture",
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.white60,
+                                    indicatorSize: TabBarIndicatorSize.tab,
+                                    labelColor: theme.colorScheme.primary,
+                                    unselectedLabelColor:
+                                        theme.colorScheme.onSurfaceVariant,
+                                    labelStyle: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                    tabs: [
+                                      Tab(text: "🍱 AI Buds (${buds.length + 1})"),
+                                      Tab(text: "🧠 GGUF Models (${files.length})"),
+                                    ],
+                                  ),
+                                ),
+
+                                const SizedBox(height: 12),
+
+                                // TAB CONTENTS (ACTUAL BUDS & MODELS)
+                                Expanded(
+                                  child: TabBarView(
+                                    children: [
+                                      // TAB 1: ACTUAL AVAILABLE BUDS
+                                      ListView(
+                                        controller: scrollController,
+                                        children: [
+                                          _buildDynamicBudTile(
+                                            title: "Raw LLM (No Persona)",
+                                            subtitle:
+                                                "Direct model completion without custom system prompt",
+                                            icon: Icons.memory_rounded,
+                                            isActive: _activeBud == null,
+                                            onTap: () {
+                                              _onBudChanged(null);
+                                              Navigator.pop(modalCtx);
+                                            },
+                                          ),
+                                          const SizedBox(height: 8),
+                                          ...buds.map((bud) {
+                                            final isActive =
+                                                _activeBud?.id == bud.id;
+                                            return Padding(
+                                              padding: const EdgeInsets.only(
+                                                  bottom: 8),
+                                              child: _buildDynamicBudTile(
+                                                title: bud.name,
+                                                subtitle: bud.systemPrompt,
+                                                icon: _getBudIconData(
+                                                    bud.iconName),
+                                                isActive: isActive,
+                                                onTap: () {
+                                                  _onBudChanged(bud);
+                                                  Navigator.pop(modalCtx);
+                                                },
+                                              ),
+                                            );
+                                          }),
+                                        ],
+                                      ),
+
+                                      // TAB 2: ACTUAL AVAILABLE GGUF MODELS
+                                      files.isEmpty
+                                          ? Center(
+                                              child: Text(
+                                                "No downloaded GGUF files found.",
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: theme.colorScheme.outline,
+                                                ),
+                                              ),
+                                            )
+                                          : ListView.builder(
+                                              controller: scrollController,
+                                              itemCount: files.length,
+                                              itemBuilder: (context, index) {
+                                                final file = files[index];
+                                                final rawName =
+                                                    file.path.split('/').last;
+                                                final clean = formatCleanModelName(
+                                                    file.path);
+                                                final isSelected =
+                                                    modelPath == file.path;
+
+                                                return Card(
+                                                  margin: const EdgeInsets.only(
+                                                      bottom: 8),
+                                                  color: isSelected
+                                                      ? theme.colorScheme.primaryContainer
+                                                          .withOpacity(0.35)
+                                                      : theme.colorScheme
+                                                          .surfaceContainerLow,
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(12),
+                                                    side: BorderSide(
+                                                      color: isSelected
+                                                          ? theme.colorScheme.primary
+                                                          : theme.colorScheme.outlineVariant
+                                                              .withOpacity(0.3),
+                                                      width: isSelected ? 1.5 : 1,
+                                                    ),
+                                                  ),
+                                                  child: ListTile(
+                                                    dense: true,
+                                                    leading: Icon(
+                                                      Icons.memory_rounded,
+                                                      color: isSelected
+                                                          ? theme.colorScheme.primary
+                                                          : theme.colorScheme.onSurfaceVariant,
+                                                    ),
+                                                    title: Text(
+                                                      clean,
+                                                      style: TextStyle(
+                                                        color: theme.colorScheme.onSurface,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        fontSize: 13,
+                                                      ),
+                                                    ),
+                                                    subtitle: Text(
+                                                      rawName,
+                                                      style: TextStyle(
+                                                        color: theme.colorScheme.onSurfaceVariant,
+                                                        fontSize: 10,
+                                                      ),
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                    trailing: isSelected
+                                                        ? Container(
+                                                            padding:
+                                                                const EdgeInsets
+                                                                    .symmetric(
+                                                                    horizontal: 8,
+                                                                    vertical: 3),
+                                                            decoration:
+                                                                BoxDecoration(
+                                                              color: Colors.green
+                                                                  .withOpacity(0.2),
+                                                              borderRadius:
+                                                                  BorderRadius
+                                                                      .circular(6),
+                                                              border: Border.all(
+                                                                  color: Colors
+                                                                      .green),
+                                                            ),
+                                                            child: const Text(
+                                                              "ACTIVE",
+                                                              style: TextStyle(
+                                                                fontSize: 9,
+                                                                fontWeight:
+                                                                    FontWeight.bold,
+                                                                color: Colors
+                                                                    .green,
+                                                              ),
+                                                            ),
+                                                          )
+                                                        : ElevatedButton(
+                                                            style:
+                                                                ElevatedButton.styleFrom(
+                                                              padding: const EdgeInsets
+                                                                  .symmetric(
+                                                                  horizontal: 10,
+                                                                  vertical: 2),
+                                                              minimumSize:
+                                                                  Size.zero,
+                                                              tapTargetSize:
+                                                                  MaterialTapTargetSize
+                                                                      .shrinkWrap,
+                                                            ),
+                                                            onPressed: () async {
+                                                              if (LlamaCppAiService
+                                                                          .loadedModelPath !=
+                                                                      null &&
+                                                                  LlamaCppAiService
+                                                                          .loadedModelPath !=
+                                                                      file.path) {
+                                                                await LlamaCppAiService
+                                                                    .unloadModel();
+                                                              }
+                                                              await _settingsRepository
+                                                                  .updateModelPath(
+                                                                      file.path);
+                                                              _loadLocalGgufModel(
+                                                                  file.path);
+                                                              setState(() {});
+                                                            },
+                                                            child: const Text(
+                                                              "Use & Load",
+                                                              style: TextStyle(
+                                                                  fontSize: 10),
+                                                            ),
+                                                          ),
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                    ],
+                                  ),
+                                ),
+
+                                const SizedBox(height: 12),
+
+                                // BOTTOM ACTION BUTTONS
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: FilledButton.icon(
+                                        onPressed: () => Navigator.pop(modalCtx),
+                                        icon: const Icon(Icons.check, size: 18),
+                                        label: const Text(
+                                          "Apply to Chat",
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        onPressed: () {
+                                          Navigator.pop(modalCtx);
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) =>
+                                                  const ModelsScreen(),
+                                            ),
+                                          );
+                                        },
+                                        icon: const Icon(Icons.download_rounded,
+                                            size: 18),
+                                        label: const Text("Manage in Hub"),
                                       ),
                                     ),
                                   ],
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.green.withOpacity(0.2),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Text(
-                                  "• 986 MB",
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.greenAccent,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 14),
-
-                        // TAB BUTTONS
-                        Container(
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF251A17),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          padding: const EdgeInsets.all(4),
-                          child: TabBar(
-                            indicator: BoxDecoration(
-                              color: const Color(0xFFFF5722),
-                              borderRadius: BorderRadius.circular(12),
+                              ],
                             ),
-                            indicatorSize: TabBarIndicatorSize.tab,
-                            labelColor: Colors.white,
-                            unselectedLabelColor: Colors.white54,
-                            labelStyle: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            tabs: const [
-                              Tab(text: "🍱 AI Buds 3"),
-                              Tab(text: "🧠 GGUF Models 4"),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        // TAB CONTENTS
-                        Expanded(
-                          child: TabBarView(
-                            children: [
-                              // TAB 1: AI BUDS
-                              StreamBuilder<List<Bud>>(
-                                stream: _budRepository.watchBuds(),
-                                builder: (context, snapshot) {
-                                  final buds = snapshot.data ?? [];
-                                  return ListView(
-                                    controller: scrollController,
-                                    children: [
-                                      _buildReferenceBudTile(
-                                        title: "Coding Bud",
-                                        subtitle:
-                                            "Temp 0.2 • Flutter, Rust, architecture",
-                                        icon: Icons.code_rounded,
-                                        isActive: _activeBud?.name == "Coding Bud" || _activeBud == null,
-                                        onTap: () {
-                                          if (buds.isNotEmpty) _onBudChanged(buds.first);
-                                        },
-                                      ),
-                                      const SizedBox(height: 8),
-                                      _buildReferenceBudTile(
-                                        title: "Teacher Bud",
-                                        subtitle:
-                                            "Socratic guidance & step-by-step breakdown • Temp 0.5",
-                                        icon: Icons.school_rounded,
-                                        isActive: _activeBud?.name == "Teacher Bud",
-                                        onTap: () {
-                                          if (buds.length > 1) _onBudChanged(buds[1]);
-                                        },
-                                      ),
-                                      const SizedBox(height: 8),
-                                      _buildReferenceBudTile(
-                                        title: "Writing Bud",
-                                        subtitle:
-                                            "Lyrical nuance, creative narratives & prose • Temp 0.85",
-                                        icon: Icons.palette_rounded,
-                                        isActive: _activeBud?.name == "Writing Bud",
-                                        onTap: () {
-                                          if (buds.length > 2) _onBudChanged(buds[2]);
-                                        },
-                                      ),
-                                    ],
-                                  );
-                                },
-                              ),
-
-                              // TAB 2: GGUF MODELS
-                              FutureBuilder<List<File>>(
-                                future: _hfService.getDownloadedGgufFiles(),
-                                builder: (context, snapshot) {
-                                  final files = snapshot.data ?? [];
-                                  if (files.isEmpty) {
-                                    return const Center(
-                                      child: Text(
-                                        "No offline GGUF files found",
-                                        style: TextStyle(color: Colors.white54),
-                                      ),
-                                    );
-                                  }
-                                  return ListView.builder(
-                                    controller: scrollController,
-                                    itemCount: files.length,
-                                    itemBuilder: (context, index) {
-                                      final file = files[index];
-                                      final rawName = file.path.split('/').last;
-                                      final clean = formatCleanModelName(rawName);
-                                      final isSelected = modelPath == file.path;
-
-                                      return Card(
-                                        margin: const EdgeInsets.only(bottom: 8),
-                                        color: const Color(0xFF251A17),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                          side: BorderSide(
-                                            color: isSelected
-                                                ? Colors.orange
-                                                : Colors.white10,
-                                          ),
-                                        ),
-                                        child: ListTile(
-                                          leading: const Icon(Icons.memory_rounded,
-                                              color: Colors.orange),
-                                          title: Text(clean,
-                                              style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 13)),
-                                          subtitle: Text(rawName,
-                                              style: const TextStyle(
-                                                  color: Colors.white38,
-                                                  fontSize: 10),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis),
-                                          trailing: isSelected
-                                              ? const Chip(
-                                                  label: Text("ACTIVE",
-                                                      style: TextStyle(
-                                                          fontSize: 9,
-                                                          color: Colors.white)),
-                                                  backgroundColor: Colors.orange,
-                                                )
-                                              : ElevatedButton(
-                                                  style: ElevatedButton.styleFrom(
-                                                    backgroundColor:
-                                                        Colors.deepOrange,
-                                                  ),
-                                                  onPressed: () async {
-                                                    await _settingsRepository
-                                                        .updateModelPath(file.path);
-                                                    _loadLocalGgufModel(file.path);
-                                                  },
-                                                  child: const Text("Load",
-                                                      style: TextStyle(
-                                                          fontSize: 11,
-                                                          color: Colors.white)),
-                                                ),
-                                        ),
-                                      );
-                                    },
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // BOTTOM BUTTONS
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFFFF6D3B),
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                ),
-                                onPressed: () => Navigator.pop(modalCtx),
-                                icon: const Icon(Icons.check, color: Colors.white, size: 18),
-                                label: const Text(
-                                  "Apply to Chat",
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.bold, color: Colors.white),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.white,
-                                  side: const BorderSide(color: Colors.white24),
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                ),
-                                onPressed: () {
-                                  Navigator.pop(modalCtx);
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => const ModelsScreen(),
-                                    ),
-                                  );
-                                },
-                                icon: const Icon(Icons.download_rounded, size: 18),
-                                label: const Text("Manage in Hub"),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                );
+              },
             );
           },
         );
       },
-    );
+    ).then((_) {
+      FocusManager.instance.primaryFocus?.unfocus();
+      if (mounted) {
+        FocusScope.of(context).unfocus();
+        _inputFocusNode.unfocus();
+      }
+    });
   }
 
-  Widget _buildReferenceBudTile({
+  Widget _buildDynamicBudTile({
     required String title,
     required String subtitle,
     required IconData icon,
     required bool isActive,
     required VoidCallback onTap,
   }) {
+    final theme = Theme.of(context);
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF251A17),
+        color: isActive
+            ? theme.colorScheme.primaryContainer.withOpacity(0.35)
+            : theme.colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isActive ? Colors.deepOrange : Colors.white10,
+          color: isActive
+              ? theme.colorScheme.primary
+              : theme.colorScheme.outlineVariant.withOpacity(0.4),
           width: isActive ? 1.5 : 1,
         ),
       ),
       child: InkWell(
+        borderRadius: BorderRadius.circular(16),
         onTap: onTap,
         child: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: isActive ? Colors.deepOrange : Colors.white12,
+                color: isActive
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.surfaceContainerHighest,
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, color: Colors.white, size: 18),
+              child: Icon(
+                icon,
+                color: isActive
+                    ? theme.colorScheme.onPrimary
+                    : theme.colorScheme.onSurfaceVariant,
+                size: 18,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -768,52 +767,53 @@ class ChatScreenState extends State<ChatScreen> {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: isActive ? FontWeight.bold : FontWeight.w600,
+                      color: theme.colorScheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: const TextStyle(
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
                       fontSize: 11,
-                      color: Colors.white54,
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
               ),
             ),
-            if (isActive)
-              const Row(
-                children: [
-                  Icon(Icons.check, color: Colors.greenAccent, size: 16),
-                  SizedBox(width: 4),
-                  Text(
-                    "Active",
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.greenAccent,
-                    ),
-                  ),
-                ],
+            if (isActive) ...[
+              const SizedBox(width: 8),
+              Icon(
+                Icons.check_circle_rounded,
+                color: theme.colorScheme.primary,
+                size: 18,
               ),
+            ],
           ],
         ),
       ),
     );
   }
 
-  // 2. OPEN VOICE SYNTHESIS & TTS SHEET (References @voice&TTS-selection.png)
+  // 2. OPEN VOICE SYNTHESIS & TTS SHEET (Matched Color Palette)
   void openTtsVoiceSheet() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    FocusScope.of(context).unfocus();
+    _inputFocusNode.unfocus();
+
+    final theme = Theme.of(context);
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF1B1412),
+      backgroundColor: theme.colorScheme.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (modalCtx) {
         return StatefulBuilder(
@@ -826,10 +826,10 @@ class ChatScreenState extends State<ChatScreen> {
                 children: [
                   Center(
                     child: Container(
-                      width: 38,
+                      width: 36,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: Colors.white24,
+                        color: theme.colorScheme.outlineVariant,
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -839,12 +839,14 @@ class ChatScreenState extends State<ChatScreen> {
                   // HEADER
                   Row(
                     children: [
-                      const Text(
-                        "Voice Synthesis & TTS",
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                      Flexible(
+                        child: Text(
+                          "Voice Synthesis & TTS",
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -854,22 +856,21 @@ class ChatScreenState extends State<ChatScreen> {
                         decoration: BoxDecoration(
                           color: Colors.green.withOpacity(0.15),
                           borderRadius: BorderRadius.circular(10),
-                          border:
-                              Border.all(color: Colors.green.withOpacity(0.5)),
+                          border: Border.all(
+                              color: Colors.green.withOpacity(0.5)),
                         ),
                         child: const Text(
                           "• Offline • ONNX",
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
-                            color: Colors.greenAccent,
+                            color: Colors.green,
                           ),
                         ),
                       ),
                       const Spacer(),
                       IconButton(
-                        icon: const Icon(Icons.close,
-                            color: Colors.white70, size: 20),
+                        icon: const Icon(Icons.close, size: 20),
                         onPressed: () => Navigator.pop(modalCtx),
                       ),
                     ],
@@ -879,7 +880,7 @@ class ChatScreenState extends State<ChatScreen> {
                     "⚡ Piper / Sherpa-ONNX Engine  •  0ms Cloud Latency",
                     style: TextStyle(
                       fontSize: 11,
-                      color: Colors.orange.shade200,
+                      color: theme.colorScheme.primary,
                       fontFamily: 'monospace',
                     ),
                   ),
@@ -889,23 +890,24 @@ class ChatScreenState extends State<ChatScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF2B1D19),
+                      color: theme.colorScheme.surfaceContainerHigh,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: Colors.deepOrange.withOpacity(0.4),
+                        color: theme.colorScheme.outlineVariant
+                            .withOpacity(0.5),
                       ),
                     ),
                     child: Row(
                       children: [
                         IconButton(
                           style: IconButton.styleFrom(
-                            backgroundColor: Colors.deepOrange,
+                            backgroundColor: theme.colorScheme.primary,
                           ),
                           icon: Icon(
                             _isPlayingSample
                                 ? Icons.pause_rounded
                                 : Icons.play_arrow_rounded,
-                            color: Colors.white,
+                            color: theme.colorScheme.onPrimary,
                           ),
                           onPressed: () {
                             setSheetState(() {
@@ -925,7 +927,6 @@ class ChatScreenState extends State<ChatScreen> {
                                     style: const TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.white,
                                     ),
                                   ),
                                   const SizedBox(width: 6),
@@ -933,17 +934,17 @@ class ChatScreenState extends State<ChatScreen> {
                                     "22.05 kHz",
                                     style: TextStyle(
                                       fontSize: 10,
-                                      color: Colors.greenAccent,
+                                      color: Colors.green,
                                     ),
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 2),
-                              const Text(
+                              Text(
                                 '"On-device LLMs run directly in memory ..."',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: Colors.white54,
+                                  color: theme.colorScheme.onSurfaceVariant,
                                   fontStyle: FontStyle.italic,
                                 ),
                                 maxLines: 1,
@@ -970,7 +971,7 @@ class ChatScreenState extends State<ChatScreen> {
                   ),
 
                   const SizedBox(height: 16),
-                  const Row(
+                  Row(
                     children: [
                       Text(
                         "INSTALLED LOCAL VOICES",
@@ -978,16 +979,16 @@ class ChatScreenState extends State<ChatScreen> {
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 0.8,
-                          color: Colors.white54,
+                          color: theme.colorScheme.outline,
                         ),
                       ),
-                      Spacer(),
-                      Text(
+                      const Spacer(),
+                      const Text(
                         "4 READY",
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
-                          color: Colors.greenAccent,
+                          color: Colors.green,
                         ),
                       ),
                     ],
@@ -1018,48 +1019,60 @@ class ChatScreenState extends State<ChatScreen> {
                   // CADENCE & PITCH CONTROLS
                   Row(
                     children: [
-                      const Text(
+                      Text(
                         "Speaking Cadence:",
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.white70,
+                          color: theme.colorScheme.onSurfaceVariant,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       const Spacer(),
-                      Wrap(
-                        spacing: 6,
-                        children: [0.8, 1.0, 1.2, 1.5].map((speed) {
-                          final isSel = _speakingCadence == speed;
-                          return InkWell(
-                            onTap: () {
-                              setSheetState(() => _speakingCadence = speed);
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: isSel
-                                    ? Colors.deepOrange
-                                    : const Color(0xFF251A17),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: isSel
-                                      ? Colors.orange
-                                      : Colors.white12,
+                      Flexible(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [0.8, 1.0, 1.2, 1.5].map((speed) {
+                              final isSel = _speakingCadence == speed;
+                              return Padding(
+                                padding: const EdgeInsets.only(left: 6),
+                                child: InkWell(
+                                  onTap: () {
+                                    setSheetState(
+                                        () => _speakingCadence = speed);
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: isSel
+                                          ? theme.colorScheme.primaryContainer
+                                          : theme.colorScheme.surfaceContainerLow,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: isSel
+                                            ? theme.colorScheme.primary
+                                            : theme.colorScheme.outlineVariant
+                                                .withOpacity(0.4),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      "${speed}x",
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: isSel
+                                            ? theme.colorScheme.primary
+                                            : theme.colorScheme.onSurface,
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                              child: Text(
-                                "${speed}x",
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: isSel ? Colors.white : Colors.white60,
-                                ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
+                              );
+                            }).toList(),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -1067,25 +1080,26 @@ class ChatScreenState extends State<ChatScreen> {
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      const Text(
+                      Text(
                         "Pitch Modulation:",
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.white70,
+                          color: theme.colorScheme.onSurfaceVariant,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       const Spacer(),
-                      const Text(
+                      Text(
                         "Flat",
-                        style: TextStyle(fontSize: 10, color: Colors.white38),
+                        style: TextStyle(
+                            fontSize: 10, color: theme.colorScheme.outline),
                       ),
                       Expanded(
                         child: Slider(
                           value: _pitchModulation,
                           min: 0.5,
                           max: 2.0,
-                          activeColor: Colors.deepOrange,
+                          activeColor: theme.colorScheme.primary,
                           onChanged: (val) {
                             setSheetState(() => _pitchModulation = val);
                           },
@@ -1093,9 +1107,9 @@ class ChatScreenState extends State<ChatScreen> {
                       ),
                       Text(
                         "+${_pitchModulation.toStringAsFixed(1)}",
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 11,
-                            color: Colors.orangeAccent,
+                            color: theme.colorScheme.primary,
                             fontWeight: FontWeight.bold),
                       ),
                     ],
@@ -1107,44 +1121,27 @@ class ChatScreenState extends State<ChatScreen> {
                   Row(
                     children: [
                       Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFFF6D3B),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
+                        child: FilledButton.icon(
                           onPressed: () {
                             Navigator.pop(modalCtx);
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text("Default Voice set to $_selectedVoice"),
+                                content:
+                                    Text("Default Voice set to $_selectedVoice"),
                                 behavior: SnackBarBehavior.floating,
                               ),
                             );
                           },
-                          icon: const Icon(Icons.check,
-                              color: Colors.white, size: 18),
+                          icon: const Icon(Icons.check, size: 18),
                           label: const Text(
                             "Set Default Voice",
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white),
+                            style: TextStyle(fontWeight: FontWeight.bold),
                           ),
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            side: const BorderSide(color: Colors.white24),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
                           onPressed: () {
                             Navigator.pop(modalCtx);
                             Navigator.push(
@@ -1166,15 +1163,24 @@ class ChatScreenState extends State<ChatScreen> {
           },
         );
       },
-    );
+    ).then((_) {
+      FocusManager.instance.primaryFocus?.unfocus();
+      if (mounted) {
+        FocusScope.of(context).unfocus();
+        _inputFocusNode.unfocus();
+      }
+    });
   }
 
   Widget _buildSoundBar(double height, bool active) {
+    final theme = Theme.of(context);
     return Container(
       width: 3,
       height: active ? height : 6,
       decoration: BoxDecoration(
-        color: active ? Colors.orangeAccent : Colors.white24,
+        color: active
+            ? theme.colorScheme.primary
+            : theme.colorScheme.outlineVariant,
         borderRadius: BorderRadius.circular(2),
       ),
     );
@@ -1188,28 +1194,42 @@ class ChatScreenState extends State<ChatScreen> {
     required bool isSelected,
     required VoidCallback onTap,
   }) {
+    final theme = Theme.of(context);
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF251A17),
+        color: isSelected
+            ? theme.colorScheme.primaryContainer.withOpacity(0.35)
+            : theme.colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isSelected ? Colors.deepOrange : Colors.white10,
+          color: isSelected
+              ? theme.colorScheme.primary
+              : theme.colorScheme.outlineVariant.withOpacity(0.4),
           width: isSelected ? 1.5 : 1,
         ),
       ),
       child: InkWell(
+        borderRadius: BorderRadius.circular(16),
         onTap: onTap,
         child: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: isSelected ? Colors.deepOrange : Colors.white12,
+                color: isSelected
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.surfaceContainerHighest,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.record_voice_over_rounded,
-                  color: Colors.white, size: 18),
+              child: Icon(
+                Icons.record_voice_over_rounded,
+                color: isSelected
+                    ? theme.colorScheme.onPrimary
+                    : theme.colorScheme.onSurfaceVariant,
+                size: 18,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -1220,10 +1240,10 @@ class ChatScreenState extends State<ChatScreen> {
                     children: [
                       Text(
                         name,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          color: theme.colorScheme.onSurface,
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -1231,14 +1251,14 @@ class ChatScreenState extends State<ChatScreen> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.deepOrange.withOpacity(0.2),
+                          color: theme.colorScheme.primary.withOpacity(0.15),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
                           tag,
                           style: TextStyle(
                             fontSize: 9,
-                            color: Colors.orange.shade200,
+                            color: theme.colorScheme.primary,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -1250,7 +1270,7 @@ class ChatScreenState extends State<ChatScreen> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: Colors.greenAccent,
+                            color: Colors.green,
                           ),
                         ),
                     ],
@@ -1258,16 +1278,23 @@ class ChatScreenState extends State<ChatScreen> {
                   const SizedBox(height: 2),
                   Text(
                     desc,
-                    style: const TextStyle(fontSize: 11, color: Colors.white70),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 2),
                   Text(
                     meta,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 9,
-                      color: Colors.white38,
+                      color: theme.colorScheme.outline,
                       fontFamily: 'monospace',
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
@@ -1501,6 +1528,7 @@ class ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _scrollController.removeListener(_handleScroll);
     _textController.dispose();
+    _inputFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -1581,6 +1609,7 @@ class ChatScreenState extends State<ChatScreen> {
         ),
         ChatInput(
           controller: _textController,
+          focusNode: _inputFocusNode,
           isGenerating: isInputGenerating,
           onSend: _sendMessage,
           onStop: _stopGeneration,

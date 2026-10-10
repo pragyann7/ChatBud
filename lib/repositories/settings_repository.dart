@@ -48,7 +48,9 @@ class SettingsRepository {
   }
 
   Stream<AppSettings?> watchSettings() {
-    return isar.appSettings.watchObject(_settingsId, fireImmediately: true);
+    return isar.appSettings
+        .watchObject(_settingsId, fireImmediately: true)
+        .asBroadcastStream();
   }
 
   Future<void> updateTheme(String newTheme) async {
